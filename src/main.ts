@@ -1084,7 +1084,7 @@ function wireUi() {
   for (const el of [
     els.fNoDigit, els.fNoHyphen, els.fOnlyDigits, els.fOnlyLetters,
     els.fPalindrome, els.fRepeat, els.fCvcv,
-    els.fWord, els.fTranco, els.fMajestic, els.fWayback, els.fDns, els.fWatch, els.fNotes
+    els.fWord, els.fTranco, els.fMajestic, els.fOpr, els.fCc, els.fWayback, els.fDns, els.fWatch, els.fNotes
   ]) {
     el.addEventListener('change', refresh);
   }
