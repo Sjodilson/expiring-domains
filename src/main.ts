@@ -68,7 +68,7 @@ interface Filters {
   tld: string;
   from: string;
   to: string;
-  sortKey: 'release_at' | 'name' | 'length';
+  sortKey: 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score';
   sortDir: 'asc' | 'desc';
   noDigit: boolean;
   noHyphen: boolean;
@@ -305,6 +305,13 @@ function buildOrderBy(f: Filters): string {
   // Säkerställ deterministiskt: lägg alltid till name som tiebreaker
   if (f.sortKey === 'name') return `name ${dir}`;
   if (f.sortKey === 'length') return `length ${dir}, name ASC`;
+  if (f.sortKey === 'majestic_refsubnets') {
+    // NULLs last: sortera null-rader sist oavsett riktning
+    return `CASE WHEN majestic_refsubnets IS NULL THEN 1 ELSE 0 END, majestic_refsubnets ${dir}, name ASC`;
+  }
+  if (f.sortKey === 'opr_score') {
+    return `CASE WHEN opr_score IS NULL THEN 1 ELSE 0 END, opr_score ${dir}, name ASC`;
+  }
   return `release_at ${dir}, name ASC`;
 }
 
@@ -316,7 +323,7 @@ const SHORT_KEY: Record<string, string> = {
   sortKey: 'sk', sortDir: 'sd',
   noDigit: 'nd', noHyphen: 'nh', onlyDigits: 'od', onlyLetters: 'ol',
   palindrome: 'pa', repeat: 'rp', cvcv: 'cv',
-  word: 'w', tranco: 'tr', majestic: 'mj', wayback: 'wb', dns: 'dn',
+  word: 'w', tranco: 'tr', majestic: 'mj', opr: 'op', cc: 'cc', wayback: 'wb', dns: 'dn',
   watch: 'wl', notes: 'nt', minLen: 'mn', maxLen: 'mx'
 };
 const LONG_KEY: Record<string, keyof Filters> = Object.fromEntries(
@@ -542,7 +549,7 @@ function renderRow(idx: number, top: number): string {
   const row = getRow(idx);
   if (!row) {
     return `<div class="row" style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_HEIGHT}px;">
-      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span>
+      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>`;
   }
   const url = `https://internetstiftelsen.se/domain/${encodeURIComponent(row.name)}/`;
@@ -552,6 +559,8 @@ function renderRow(idx: number, top: number): string {
     <button class="star${starred ? ' active' : ''}" data-action="star" title="Bevaka (s)">${starred ? '★' : '☆'}</button>
     <a class="name" href="${url}" target="_blank" rel="noopener" data-action="open">${escapeHtml(row.name)}</a>
     <span class="signals">${signalsHtml(row)}</span>
+    <span class="bl text-right tabular-nums text-xs text-slate-500 dark:text-slate-400">${row.majestic_refsubnets != null ? row.majestic_refsubnets.toLocaleString('sv-SE') : '<span class="text-slate-300 dark:text-slate-600">–</span>'}</span>
+    <span class="opr text-right tabular-nums text-xs text-slate-500 dark:text-slate-400">${row.opr_score != null ? row.opr_score.toFixed(1) : '<span class="text-slate-300 dark:text-slate-600">–</span>'}</span>
     <span class="len">${row.length}</span>
     <span class="date">${escapeHtml(row.release_at)}</span>
     <button class="more" data-action="more" title="Detaljer (Enter)">⋯</button>
