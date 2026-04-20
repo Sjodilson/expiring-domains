@@ -527,6 +527,13 @@ function getTotal(): number {
 // ───────────────────────────────────────────────────────────────────────────
 // Rendering
 // ───────────────────────────────────────────────────────────────────────────
+function blValue(r: Row): string {
+  // Show Majestic refsubnets if available, otherwise CC hosts count
+  if (r.majestic_refsubnets != null) return r.majestic_refsubnets.toLocaleString('sv-SE');
+  if (r.cc_hosts != null) return r.cc_hosts.toLocaleString('sv-SE');
+  return '–';
+}
+
 function signalsHtml(r: Row): string {
   const out: string[] = [];
   if (r.is_word) out.push('<span class="sig word" title="Är ett svenskt ord">📖</span>');
@@ -559,10 +566,10 @@ function renderRow(idx: number, top: number): string {
     <button class="star${starred ? ' active' : ''}" data-action="star" title="Bevaka (s)">${starred ? '★' : '☆'}</button>
     <a class="name" href="${url}" target="_blank" rel="noopener" data-action="open">${escapeHtml(row.name)}</a>
     <span class="signals">${signalsHtml(row)}</span>
-    <span class="bl text-right tabular-nums text-xs text-slate-500 dark:text-slate-400">${row.majestic_refsubnets != null ? row.majestic_refsubnets.toLocaleString('sv-SE') : '<span class="text-slate-300 dark:text-slate-600">–</span>'}</span>
-    <span class="opr text-right tabular-nums text-xs text-slate-500 dark:text-slate-400">${row.opr_score != null ? row.opr_score.toFixed(1) : '<span class="text-slate-300 dark:text-slate-600">–</span>'}</span>
+    <span class="bl text-right tabular-nums text-xs ${row.majestic_refsubnets != null || row.cc_hosts != null ? 'text-slate-600 dark:text-slate-300' : 'text-slate-300 dark:text-slate-600'}">${blValue(row)}</span>
+    <span class="opr text-right tabular-nums text-xs ${row.opr_score != null ? 'text-slate-600 dark:text-slate-300' : 'text-slate-300 dark:text-slate-600'}">${row.opr_score != null ? row.opr_score.toFixed(1) : '–'}</span>
     <span class="len">${row.length}</span>
-    <span class="date">${escapeHtml(row.release_at)}</span>
+    <span class="date">${escapeHtml(row.release_at.slice(5))}</span>
     <button class="more" data-action="more" title="Detaljer (Enter)">⋯</button>
   </div>`;
 }

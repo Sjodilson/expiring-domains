@@ -17,19 +17,25 @@ export async function loadOpenPageRankMap(log) {
   const csv = csvEntry.getData().toString('utf8');
   const map = new Map();
   let count = 0;
+  const unq = (s) => s.replace(/^"|"$/g, '').trim();
   for (const line of csv.split('\n')) {
-    // Format: Rank,Domain,Open Page Rank
+    // Format: "Rank","Domain","Open Page Rank"
     const idx1 = line.indexOf(',');
     if (idx1 === -1) continue;
     const idx2 = line.indexOf(',', idx1 + 1);
     if (idx2 === -1) continue;
-    const rank = parseInt(line.slice(0, idx1), 10);
-    const domain = line.slice(idx1 + 1, idx2).trim().toLowerCase();
-    const score = parseFloat(line.slice(idx2 + 1).trim());
+    const rank = parseInt(unq(line.slice(0, idx1)), 10);
+    let domain = unq(line.slice(idx1 + 1, idx2)).toLowerCase();
+    const score = parseFloat(unq(line.slice(idx2 + 1)));
     if (!rank || !domain || isNaN(score)) continue;
+    // Strip www. prefix
+    if (domain.startsWith('www.')) domain = domain.slice(4);
     if (domain.endsWith('.se') || domain.endsWith('.nu')) {
-      map.set(domain, { rank, score });
-      count++;
+      // Keep highest rank (first seen = best rank since file is sorted)
+      if (!map.has(domain)) {
+        map.set(domain, { rank, score });
+        count++;
+      }
     }
   }
   log(`  Open PageRank: ${count.toLocaleString('sv-SE')} relevanta domäner`);
