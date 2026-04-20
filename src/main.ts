@@ -527,13 +527,6 @@ function getTotal(): number {
 // ───────────────────────────────────────────────────────────────────────────
 // Rendering
 // ───────────────────────────────────────────────────────────────────────────
-function blValue(r: Row): string {
-  // Show Majestic refsubnets if available, otherwise CC hosts count
-  if (r.majestic_refsubnets != null) return r.majestic_refsubnets.toLocaleString('sv-SE');
-  if (r.cc_hosts != null) return r.cc_hosts.toLocaleString('sv-SE');
-  return '–';
-}
-
 function signalsHtml(r: Row): string {
   const out: string[] = [];
   if (r.is_word) out.push('<span class="sig word" title="Är ett svenskt ord">📖</span>');
@@ -549,6 +542,9 @@ function signalsHtml(r: Row): string {
   if (r.is_palindrome) out.push('<span class="sig" title="Palindrom">↔</span>');
   if (r.is_cvcv) out.push('<span class="sig" title="Uttalbart CVCV-mönster">🗣</span>');
   if (notes.has(r.name)) out.push('<span class="sig" title="Har anteckning">📝</span>');
+  const bl = r.majestic_refsubnets ?? r.cc_hosts;
+  out.push(`<span class="metric" title="Backlinks: ${bl ?? 'saknas'}">BL ${bl ?? '-'}</span>`);
+  out.push(`<span class="metric" title="Open PageRank (DA): ${r.opr_score != null ? r.opr_score.toFixed(2) : 'saknas'}">DA ${r.opr_score != null ? r.opr_score.toFixed(1) : '-'}</span>`);
   return out.join('');
 }
 
@@ -566,10 +562,8 @@ function renderRow(idx: number, top: number): string {
     <button class="star${starred ? ' active' : ''}" data-action="star" title="Bevaka (s)">${starred ? '★' : '☆'}</button>
     <a class="name" href="${url}" target="_blank" rel="noopener" data-action="open">${escapeHtml(row.name)}</a>
     <span class="signals">${signalsHtml(row)}</span>
-    <span class="bl text-right tabular-nums text-xs ${row.majestic_refsubnets != null || row.cc_hosts != null ? 'text-slate-600 dark:text-slate-300' : 'text-slate-300 dark:text-slate-600'}">${blValue(row)}</span>
-    <span class="opr text-right tabular-nums text-xs ${row.opr_score != null ? 'text-slate-600 dark:text-slate-300' : 'text-slate-300 dark:text-slate-600'}">${row.opr_score != null ? row.opr_score.toFixed(1) : '–'}</span>
     <span class="len">${row.length}</span>
-    <span class="date">${escapeHtml(row.release_at.slice(5))}</span>
+    <span class="date">${escapeHtml(row.release_at)}</span>
     <button class="more" data-action="more" title="Detaljer (Enter)">⋯</button>
   </div>`;
 }
