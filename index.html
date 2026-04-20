@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sök bland .se- och .nu-domäner som snart frisläpps från karens." />
+    <title>Frisläppta domäner — .se &amp; .nu</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B3%3C/text%3E%3C/svg%3E" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch {}
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div id="app" class="min-h-screen flex flex-col">
+      <!-- Header -->
+      <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1500px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-baseline gap-3">
+            <h1 class="text-lg font-bold tracking-tight">⏳ Frisläppta domäner</h1>
+            <span id="meta" class="text-xs text-slate-500 dark:text-slate-400 hidden md:inline">Laddar…</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="help" type="button" title="Hjälp och kortkommandon (?)"
+              class="p-2 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">?</button>
+            <button id="theme-toggle" type="button" title="Växla mörkt/ljust läge"
+              class="p-2 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+              <span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀️</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter bar - samlad på en rad -->
+        <div class="border-t border-slate-100 dark:border-slate-800">
+          <div class="max-w-[1500px] mx-auto px-4 py-2.5 flex flex-wrap items-center gap-2">
+            <!-- Sökruta -->
+            <div class="flex-1 min-w-[240px] relative">
+              <input
+                id="q"
+                type="search"
+                placeholder="Sök · / fokuserar"
+                autocomplete="off"
+                class="w-full pl-8 pr-16 py-1.5 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              />
+              <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">🔍</span>
+              <label class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 cursor-pointer">
+                <input id="regex" type="checkbox" class="rounded" />
+                <span>regex</span>
+              </label>
+            </div>
+
+            <!-- TLD-pills -->
+            <div role="radiogroup" aria-label="TLD" class="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+              <button type="button" data-tld="" class="tld-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700">Alla</button>
+              <button type="button" data-tld="se" class="tld-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700">.se</button>
+              <button type="button" data-tld="nu" class="tld-pill px-3 py-1.5">.nu</button>
+            </div>
+
+            <!-- Datumpresets -->
+            <div class="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
+              <button type="button" data-preset="all" class="date-preset px-3 py-1.5 border-r border-slate-300 dark:border-slate-700">Allt</button>
+              <button type="button" data-preset="today" class="date-preset px-3 py-1.5 border-r border-slate-300 dark:border-slate-700">Idag</button>
+              <button type="button" data-preset="7d" class="date-preset px-3 py-1.5 border-r border-slate-300 dark:border-slate-700">7d</button>
+              <button type="button" data-preset="30d" class="date-preset px-3 py-1.5 border-r border-slate-300 dark:border-slate-700">30d</button>
+              <button type="button" id="date-custom-toggle" class="px-2 py-1.5 text-xs hover:bg-slate-100 dark:hover:bg-slate-800" title="Anpassa datum">📅</button>
+            </div>
+
+            <!-- Egenskaper-popover -->
+            <div class="relative">
+              <button type="button" id="props-btn" class="popover-btn px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-md text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
+                Egenskaper <span id="props-badge" class="hidden ml-1 inline-flex items-center justify-center w-4 h-4 text-xs bg-blue-500 text-white rounded-full"></span> ▾
+              </button>
+              <div id="props-pop" class="popover hidden absolute right-0 mt-1 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-30 p-3 space-y-2 text-sm">
+                <div class="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                  <label class="flex items-center gap-1.5"><input id="f-nodigit" type="checkbox" class="rounded" /> Inga siffror</label>
+                  <label class="flex items-center gap-1.5"><input id="f-nohyphen" type="checkbox" class="rounded" /> Inga bindestreck</label>
+                  <label class="flex items-center gap-1.5"><input id="f-only-digits" type="checkbox" class="rounded" /> Endast siffror</label>
+                  <label class="flex items-center gap-1.5"><input id="f-only-letters" type="checkbox" class="rounded" /> Endast bokstäver</label>
+                  <label class="flex items-center gap-1.5"><input id="f-palindrome" type="checkbox" class="rounded" /> Palindrom</label>
+                  <label class="flex items-center gap-1.5"><input id="f-repeat" type="checkbox" class="rounded" /> Upprepad bokstav</label>
+                  <label class="flex items-center gap-1.5"><input id="f-cvcv" type="checkbox" class="rounded" /> Uttalbart (CVCV)</label>
+                </div>
+                <div class="border-t border-slate-200 dark:border-slate-700 pt-2 flex items-center gap-3 text-xs">
+                  <label class="flex items-center gap-1">Min len <input id="f-minlen" type="number" min="1" max="63" class="w-14 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded" /></label>
+                  <label class="flex items-center gap-1">Max len <input id="f-maxlen" type="number" min="1" max="63" class="w-14 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded" /></label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Kvalitet-popover -->
+            <div class="relative">
+              <button type="button" id="qual-btn" class="popover-btn px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-md text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
+                Kvalitet <span id="qual-badge" class="hidden ml-1 inline-flex items-center justify-center w-4 h-4 text-xs bg-blue-500 text-white rounded-full"></span> ▾
+              </button>
+              <div id="qual-pop" class="popover hidden absolute right-0 mt-1 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-30 p-3 space-y-1.5 text-sm">
+                <label class="flex items-center gap-1.5"><input id="f-word" type="checkbox" class="rounded" /> 📖 Är ett svenskt ord</label>
+                <label class="flex items-center gap-1.5"><input id="f-tranco" type="checkbox" class="rounded" /> ⭐ I Tranco Top 1M</label>
+                <label class="flex items-center gap-1.5"><input id="f-majestic" type="checkbox" class="rounded" /> 🔗 I Majestic Million (har backlinks)</label>
+                <label class="flex items-center gap-1.5"><input id="f-wayback" type="checkbox" class="rounded" /> ⏳ Har Wayback-snapshots</label>
+                <label class="flex items-center gap-1.5"><input id="f-dns" type="checkbox" class="rounded" /> 📡 Har aktiva DNS-records</label>
+                <div class="border-t border-slate-200 dark:border-slate-700 pt-2">
+                  <label class="flex items-center gap-1.5"><input id="f-watch" type="checkbox" class="rounded" /> 🔖 Endast bevakade</label>
+                  <label class="flex items-center gap-1.5"><input id="f-notes" type="checkbox" class="rounded" /> 📝 Endast med anteckning</label>
+                </div>
+              </div>
+            </div>
+
+            <!-- Saved searches -->
+            <div class="relative">
+              <button type="button" id="saved-btn" class="popover-btn px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-md text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
+                ☆ Sparade ▾
+              </button>
+              <div id="saved-pop" class="popover hidden absolute right-0 mt-1 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-30 p-3 text-sm">
+                <div class="flex gap-2 mb-2">
+                  <input id="saved-name" type="text" placeholder="Namnge sökning…" class="flex-1 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded text-sm" />
+                  <button id="saved-add" class="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">Spara</button>
+                </div>
+                <div id="saved-list" class="space-y-1 max-h-72 overflow-auto"></div>
+              </div>
+            </div>
+
+            <button id="reset" type="button" class="text-xs text-slate-600 dark:text-slate-400 underline hover:text-slate-900 dark:hover:text-white">Återställ</button>
+          </div>
+
+          <!-- Anpassat datum (dolt om inte aktivt) -->
+          <div id="date-custom" class="hidden border-t border-slate-100 dark:border-slate-800">
+            <div class="max-w-[1500px] mx-auto px-4 py-2 flex items-center gap-3 text-sm">
+              <label>Från <input id="from" type="date" class="ml-1 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded text-sm" /></label>
+              <label>Till <input id="to" type="date" class="ml-1 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded text-sm" /></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Aktiva filter-pills -->
+        <div id="active-pills" class="hidden border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+          <div class="max-w-[1500px] mx-auto px-4 py-2 flex flex-wrap items-center gap-1.5 text-xs"></div>
+        </div>
+      </header>
+
+      <!-- Status / actions bar -->
+      <div class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1500px] mx-auto px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+          <div id="status" class="text-sm text-slate-600 dark:text-slate-400" aria-live="polite">Laddar databas…</div>
+          <div class="flex items-center gap-2">
+            <button id="export-csv" type="button" class="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">CSV</button>
+            <button id="export-json" type="button" class="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">JSON</button>
+            <button id="copy-link" type="button" class="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800" title="Kopiera permalink">🔗</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main: tabell + sidopanel -->
+      <main class="max-w-[1500px] w-full mx-auto px-4 py-3 flex-1 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-4 min-h-0">
+        <div class="flex flex-col min-w-0">
+          <div class="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 flex flex-col overflow-hidden min-h-[400px]">
+            <div id="thead" class="grid grid-cols-[28px_minmax(0,1fr)_auto_60px_110px_30px] gap-2 px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 select-none">
+              <div></div>
+              <button type="button" data-sort="name" class="th-sort text-left">Domän <span class="sort-ind"></span></button>
+              <div class="text-right">Signaler</div>
+              <button type="button" data-sort="length" class="th-sort text-left">Len <span class="sort-ind"></span></button>
+              <button type="button" data-sort="release_at" class="th-sort text-left">Frisläpps <span class="sort-ind"></span></button>
+              <div></div>
+            </div>
+            <div id="viewport" class="overflow-auto flex-1 relative" role="region" aria-label="Domänlista" tabindex="0">
+              <div id="spacer" style="position: relative;">
+                <div id="rows" style="position: absolute; left: 0; right: 0; top: 0;"></div>
+              </div>
+              <div id="empty" class="hidden absolute inset-0 flex items-center justify-center text-slate-400 text-sm pointer-events-none">
+                Inga träffar
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="lg:sticky lg:top-2 self-start space-y-3 min-w-0">
+          <div class="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Längd</h2>
+              <span id="hist-total" class="text-xs text-slate-400"></span>
+            </div>
+            <div id="histogram" class="space-y-0.5 text-xs"></div>
+          </div>
+
+          <div class="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
+            <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Per dag</h2>
+            <div id="datebar" class="space-y-0.5 text-xs"></div>
+          </div>
+        </aside>
+      </main>
+
+      <!-- Drawer -->
+      <div id="drawer-backdrop" class="fixed inset-0 bg-black/30 hidden z-40"></div>
+      <aside id="drawer" class="fixed top-0 right-0 h-full w-full sm:w-[460px] bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-xl translate-x-full transition-transform z-50 flex flex-col" aria-hidden="true">
+        <header class="px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <h2 id="drawer-title" class="font-mono text-lg font-semibold break-all"></h2>
+              <p id="drawer-sub" class="text-xs text-slate-500 dark:text-slate-400 mt-0.5"></p>
+            </div>
+            <button id="drawer-close" class="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Stäng">✕</button>
+          </div>
+          <nav class="flex gap-1 mt-3 text-sm" role="tablist">
+            <button class="drawer-tab px-3 py-1.5 rounded-t border-b-2 border-blue-500" data-tab="overview">Översikt</button>
+            <button class="drawer-tab px-3 py-1.5 rounded-t border-b-2 border-transparent text-slate-500" data-tab="links">Källor</button>
+            <button class="drawer-tab px-3 py-1.5 rounded-t border-b-2 border-transparent text-slate-500" data-tab="similar">Liknande</button>
+            <button class="drawer-tab px-3 py-1.5 rounded-t border-b-2 border-transparent text-slate-500" data-tab="notes">Anteckningar</button>
+          </nav>
+        </header>
+        <div id="drawer-body" class="flex-1 overflow-auto p-4 text-sm"></div>
+      </aside>
+
+      <!-- Hjälp-modal -->
+      <div id="help-modal" class="hidden fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-md w-full p-5 space-y-3 text-sm">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-bold">Hjälp</h2>
+            <button id="help-close" class="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">✕</button>
+          </div>
+          <div>
+            <h3 class="font-semibold mb-1">Kortkommandon</h3>
+            <ul class="space-y-1 text-xs">
+              <li><kbd>/</kbd> fokusera sökruta</li>
+              <li><kbd>Esc</kbd> rensa / stäng</li>
+              <li><kbd>j</kbd> / <kbd>k</kbd> nästa / föregående rad</li>
+              <li><kbd>g</kbd> / <kbd>G</kbd> första / sista rad</li>
+              <li><kbd>Enter</kbd> öppna detaljer</li>
+              <li><kbd>s</kbd> bevaka markerad rad</li>
+              <li><kbd>?</kbd> visa denna hjälp</li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="font-semibold mb-1">Söksyntax</h3>
+            <ul class="space-y-1 text-xs">
+              <li><code>bil</code> — substring</li>
+              <li><code>%shop</code>, <code>kafe_</code> — SQLite LIKE-wildcards</li>
+              <li>Slå på <strong>regex</strong> för fullständig regex</li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="font-semibold mb-1">Signaler i tabellen</h3>
+            <ul class="space-y-1 text-xs">
+              <li>📖 Är ett svenskt ord</li>
+              <li>⭐ Tranco-rank (popularitet)</li>
+              <li>🔗 Backlinks (Majestic)</li>
+              <li>⏳ Wayback-snapshots</li>
+              <li>📡 Aktiva DNS-records</li>
+              <li>↔ Palindrom · 🗣 Uttalbart</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <footer class="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div class="max-w-[1500px] mx-auto px-4 py-3 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-4 gap-y-1 justify-between">
+          <span>Källa:
+            <a class="underline" href="https://internetstiftelsen.se/" target="_blank" rel="noopener">Internetstiftelsen</a> ·
+            <a class="underline" href="https://tranco-list.eu/" target="_blank" rel="noopener">Tranco</a> ·
+            <a class="underline" href="https://majestic.com/reports/majestic-million" target="_blank" rel="noopener">Majestic Million</a> ·
+            <a class="underline" href="https://web.archive.org/" target="_blank" rel="noopener">Wayback</a>
+          </span>
+          <span>All bearbetning sker lokalt i din webbläsare.</span>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Sök bland .se- och .nu-domäner som snart frisläpps från karens." />
+    <title>Frisläppta domäner — .se &amp; .nu</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B3%3C/text%3E%3C/svg%3E" />
+    <script>
+      // Sätt mörkt läge före DOM-render för att undvika flash
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch {}
+      })();
+    </script>
+  </head>
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div id="app" class="min-h-screen flex flex-col">
+      <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1400px] mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 class="text-xl font-bold tracking-tight">Frisläppta domäner</h1>
+            <p class="text-xs text-slate-600 dark:text-slate-400">
+              .se och .nu från karens. Källa:
+              <a class="underline hover:text-slate-900 dark:hover:text-white" href="https://internetstiftelsen.se/" target="_blank" rel="noopener">Internetstiftelsen</a>.
+            </p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div id="meta" class="text-xs text-slate-500 dark:text-slate-400 text-right hidden sm:block">Laddar…</div>
+            <button id="theme-toggle" type="button" title="Växla mörkt/ljust läge"
+              class="p-2 rounded-md border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-sm">
+              <span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀️</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1400px] mx-auto px-4 py-3 space-y-3">
+          <!-- Snabbfilter chips -->
+          <div id="chips" class="flex flex-wrap gap-2 text-xs"></div>
+
+          <!-- Huvudfilter -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+            <label class="lg:col-span-2 flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              <span class="flex items-center justify-between">
+                <span>Sök <span class="text-slate-400">(/-tangent)</span></span>
+                <label class="flex items-center gap-1 font-normal cursor-pointer">
+                  <input id="regex" type="checkbox" class="rounded" />
+                  <span>Regex</span>
+                </label>
+              </span>
+              <input
+                id="q"
+                type="search"
+                placeholder="t.ex. bil, %shop, kafe_, ^a.{3}$ (regex)"
+                autocomplete="off"
+                class="mt-1 px-3 py-2 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+              />
+            </label>
+
+            <label class="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              TLD
+              <select id="tld" class="mt-1 px-3 py-2 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md text-sm">
+                <option value="">Alla</option>
+                <option value="se">.se</option>
+                <option value="nu">.nu</option>
+              </select>
+            </label>
+
+            <label class="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              Frisläpps från
+              <input id="from" type="date" class="mt-1 px-3 py-2 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md text-sm" />
+            </label>
+
+            <label class="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              Frisläpps till
+              <input id="to" type="date" class="mt-1 px-3 py-2 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md text-sm" />
+            </label>
+
+            <label class="flex flex-col text-xs font-medium text-slate-600 dark:text-slate-400">
+              Sortera
+              <select id="sort" class="mt-1 px-3 py-2 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded-md text-sm">
+                <option value="release_at ASC, name ASC">Datum ↑</option>
+                <option value="release_at DESC, name ASC">Datum ↓</option>
+                <option value="name ASC">Namn A–Ö</option>
+                <option value="name DESC">Namn Ö–A</option>
+                <option value="length ASC, name ASC">Kortast först</option>
+                <option value="length DESC, name ASC">Längst först</option>
+                <option value="tranco_rank ASC, name ASC">Tranco-rank ↑</option>
+              </select>
+            </label>
+          </div>
+
+          <!-- Pattern-filter -->
+          <fieldset class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-700 dark:text-slate-300">
+            <legend class="sr-only">Mönsterfilter</legend>
+            <label class="flex items-center gap-1.5"><input id="f-nodigit" type="checkbox" class="rounded" /> Inga siffror</label>
+            <label class="flex items-center gap-1.5"><input id="f-nohyphen" type="checkbox" class="rounded" /> Inga bindestreck</label>
+            <label class="flex items-center gap-1.5"><input id="f-only-digits" type="checkbox" class="rounded" /> Endast siffror</label>
+            <label class="flex items-center gap-1.5"><input id="f-only-letters" type="checkbox" class="rounded" /> Endast bokstäver</label>
+            <label class="flex items-center gap-1.5"><input id="f-palindrome" type="checkbox" class="rounded" /> Palindrom</label>
+            <label class="flex items-center gap-1.5"><input id="f-repeat" type="checkbox" class="rounded" /> Upprepade tecken</label>
+            <label class="flex items-center gap-1.5"><input id="f-cvcv" type="checkbox" class="rounded" /> Uttalbart (CVCV)</label>
+            <label class="flex items-center gap-1.5"><input id="f-word" type="checkbox" class="rounded" /> 📖 Ord (svensk ordlista)</label>
+            <label class="flex items-center gap-1.5"><input id="f-tranco" type="checkbox" class="rounded" /> ⭐ I Tranco Top 1M</label>
+            <label class="flex items-center gap-1.5"><input id="f-watch" type="checkbox" class="rounded" /> 🔖 Endast bevakade</label>
+            <label class="flex items-center gap-1.5">Min len <input id="f-minlen" type="number" min="1" max="63" class="w-14 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded text-sm" /></label>
+            <label class="flex items-center gap-1.5">Max len <input id="f-maxlen" type="number" min="1" max="63" class="w-14 px-2 py-1 border border-slate-300 dark:border-slate-700 dark:bg-slate-800 rounded text-sm" /></label>
+            <button id="reset" type="button" class="ml-auto text-xs text-slate-600 dark:text-slate-400 underline hover:text-slate-900 dark:hover:text-white">Återställ filter</button>
+          </fieldset>
+        </div>
+      </section>
+
+      <main class="max-w-[1400px] w-full mx-auto px-4 py-3 flex-1 grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-4">
+        <div class="flex flex-col min-w-0">
+          <div class="flex items-center justify-between mb-2 gap-3 flex-wrap">
+            <div id="status" class="text-sm text-slate-600 dark:text-slate-400" aria-live="polite">Laddar databas…</div>
+            <div class="flex items-center gap-2">
+              <button id="export-csv" type="button" class="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">Export CSV</button>
+              <button id="export-json" type="button" class="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800">Export JSON</button>
+              <button id="copy-link" type="button" class="text-xs px-2 py-1 border border-slate-300 dark:border-slate-700 rounded hover:bg-slate-100 dark:hover:bg-slate-800" title="Kopiera permalink till denna sökning">🔗 Kopiera länk</button>
+            </div>
+          </div>
+
+          <div class="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 flex flex-col overflow-hidden min-h-[400px]">
+            <div class="grid grid-cols-[32px_1fr_auto_60px_110px_32px] gap-2 px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+              <div></div>
+              <div>Domän</div>
+              <div class="text-right">Taggar</div>
+              <div>Längd</div>
+              <div>Frisläpps</div>
+              <div></div>
+            </div>
+            <div id="viewport" class="overflow-auto flex-1 relative" role="region" aria-label="Domänlista" tabindex="0">
+              <div id="spacer" style="position: relative;">
+                <div id="rows" style="position: absolute; left: 0; right: 0; top: 0;"></div>
+              </div>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">
+            Tips: <kbd class="px-1 border border-slate-300 dark:border-slate-700 rounded">/</kbd> fokuserar sök ·
+            <kbd class="px-1 border border-slate-300 dark:border-slate-700 rounded">Esc</kbd> rensar ·
+            <kbd class="px-1 border border-slate-300 dark:border-slate-700 rounded">j</kbd>/<kbd class="px-1 border border-slate-300 dark:border-slate-700 rounded">k</kbd> navigerar ·
+            <kbd class="px-1 border border-slate-300 dark:border-slate-700 rounded">Enter</kbd> visar detaljer ·
+            <kbd class="px-1 border border-slate-300 dark:border-slate-700 rounded">s</kbd> bevakar
+          </p>
+        </div>
+
+        <aside class="lg:sticky lg:top-2 self-start space-y-3">
+          <div class="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Längdfördelning</h2>
+              <span id="hist-total" class="text-xs text-slate-400"></span>
+            </div>
+            <div id="histogram" class="space-y-0.5 text-xs"></div>
+          </div>
+        </aside>
+      </main>
+
+      <!-- Detalj-drawer -->
+      <div id="drawer-backdrop" class="fixed inset-0 bg-black/30 hidden z-40"></div>
+      <aside id="drawer" class="fixed top-0 right-0 h-full w-full sm:w-[420px] bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 shadow-xl translate-x-full transition-transform z-50 flex flex-col" aria-hidden="true">
+        <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+          <div>
+            <h2 id="drawer-title" class="font-mono text-lg font-semibold break-all"></h2>
+            <p id="drawer-sub" class="text-xs text-slate-500 dark:text-slate-400"></p>
+          </div>
+          <button id="drawer-close" class="p-2 rounded hover:bg-slate-100 dark:hover:bg-slate-800" aria-label="Stäng">✕</button>
+        </header>
+        <div id="drawer-body" class="flex-1 overflow-auto p-4 space-y-4 text-sm"></div>
+      </aside>
+
+      <footer class="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div class="max-w-[1400px] mx-auto px-4 py-3 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap gap-x-4 gap-y-1 justify-between">
+          <span>Daglig data från
+            <a class="underline" href="https://data.internetstiftelsen.se/bardate_domains.json" target="_blank" rel="noopener">Internetstiftelsen</a>.
+            Ord-data från ordlista, popularitet från
+            <a class="underline" href="https://tranco-list.eu/" target="_blank" rel="noopener">Tranco</a>.</span>
+          <span>All bearbetning sker lokalt i din webbläsare.</span>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+
+# Generated data — rebuilt by scripts/build-data.mjs
+public/domains.sqlite
+public/meta.json
+
+# Rolling enrichment cache (persisted via Actions cache, not git)
+cache/

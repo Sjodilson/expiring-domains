@@ -1,0 +1,25 @@
+{
+  "name": "expiring-domains",
+  "version": "1.0.0",
+  "description": "Översikt över .se och .nu domäner som snart frisläpps",
+  "type": "module",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "dev": "vite",
+    "build": "npm run build:data && vite build",
+    "build:site": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "devDependencies": {
+    "adm-zip": "^0.5.16",
+    "autoprefixer": "^10.4.20",
+    "better-sqlite3": "^11.3.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8"
+  },
+  "dependencies": {
+    "sql.js": "^1.11.0"
+  }
+}
