@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
         run: npm run build:data
         env:
           # Mängd domäner att berika per körning (resten görs nästa dag)
-          WAYBACK_MAX: '2500'
+          WAYBACK_MAX: '1000'
           DNS_MAX: '10000'
 
       - name: Save enrichment cache
