@@ -1,5 +1,6 @@
 // Bygger public/domains.sqlite + public/meta.json från Internetstiftelsens
-// bardate-data, berikat med ordlista, Tranco, Majestic, Wayback och DNS.
+// bardate-data, berikat med ordlista, Tranco, Majestic, Open PageRank,
+// Common Crawl web graph, Wayback och DNS.
 
 import { mkdirSync, rmSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -11,6 +12,8 @@ import { EnrichmentCache } from './lib/cache.mjs';
 import { enrichWayback } from './lib/wayback.mjs';
 import { enrichDns } from './lib/dnscheck.mjs';
 import { loadMajesticMap } from './lib/backlinks.mjs';
+import { loadOpenPageRankMap } from './lib/openpagerank.mjs';
+import { loadCcDomainMap } from './lib/commoncrawl.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -110,6 +113,26 @@ async function loadMajestic() {
   }
 }
 
+async function loadOpr() {
+  if (process.env.SKIP_OPR === '1') { warn('SKIP_OPR=1'); return null; }
+  try {
+    return await loadOpenPageRankMap(log);
+  } catch (err) {
+    warn(`Open PageRank misslyckades: ${err.message}`);
+    return null;
+  }
+}
+
+async function loadCc() {
+  if (process.env.SKIP_CC === '1') { warn('SKIP_CC=1'); return null; }
+  try {
+    return await loadCcDomainMap(log, CACHE_DIR);
+  } catch (err) {
+    warn(`Common Crawl misslyckades: ${err.message}`);
+    return null;
+  }
+}
+
 // ─── Mönster ───────────────────────────────────────────────────────────────
 function isPalindrome(s) {
   if (s.length < 2) return false;
@@ -129,7 +152,7 @@ function isCvcv(s) {
 }
 
 // ─── Bygg sqlite ───────────────────────────────────────────────────────────
-function buildDatabase(rows, words, tranco, majestic, cacheRows) {
+function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
   if (existsSync(DB_PATH)) rmSync(DB_PATH);
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = OFF');
@@ -160,7 +183,10 @@ function buildDatabase(rows, words, tranco, majestic, cacheRows) {
       dns_a             INTEGER,
       dns_mx            INTEGER,
       dns_ns            INTEGER,
-      dns_checked       INTEGER NOT NULL
+      dns_checked       INTEGER NOT NULL,
+      opr_rank          INTEGER,
+      opr_score         REAL,
+      cc_hosts          INTEGER
     );
   `);
 
@@ -171,12 +197,13 @@ function buildDatabase(rows, words, tranco, majestic, cacheRows) {
       is_palindrome, has_repeat, is_cvcv, is_word,
       tranco_rank, majestic_rank, majestic_refsubnets,
       wayback_first, wayback_count, wayback_checked,
-      dns_a, dns_mx, dns_ns, dns_checked
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      dns_a, dns_mx, dns_ns, dns_checked,
+      opr_rank, opr_score, cc_hosts
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const stats = {
-    word: 0, tranco: 0, majestic: 0,
+    word: 0, tranco: 0, majestic: 0, opr: 0, cc: 0,
     waybackChecked: 0, waybackHits: 0,
     dnsChecked: 0, dnsAny: 0
   };
@@ -191,6 +218,8 @@ function buildDatabase(rows, words, tranco, majestic, cacheRows) {
       const word = words && words.has(base) ? 1 : 0;
       const trancoRank = tranco ? tranco.get(name) ?? null : null;
       const maj = majestic ? majestic.get(name) ?? null : null;
+      const oprData = opr ? opr.get(name) ?? null : null;
+      const ccHosts = cc ? cc.get(name) ?? null : null;
       const cache = cacheRows.get(name);
 
       const wbFirst = cache?.wayback_first ?? null;
@@ -204,6 +233,8 @@ function buildDatabase(rows, words, tranco, majestic, cacheRows) {
       if (word) stats.word++;
       if (trancoRank != null) stats.tranco++;
       if (maj) stats.majestic++;
+      if (oprData) stats.opr++;
+      if (ccHosts != null) stats.cc++;
       if (wbChecked) {
         stats.waybackChecked++;
         if ((wbCount ?? 0) > 0) stats.waybackHits++;
@@ -227,7 +258,9 @@ function buildDatabase(rows, words, tranco, majestic, cacheRows) {
         maj?.rank ?? null,
         maj?.refSubNets ?? null,
         wbFirst, wbCount, wbChecked,
-        dnsA, dnsMx, dnsNs, dnsChecked
+        dnsA, dnsMx, dnsNs, dnsChecked,
+        oprData?.rank ?? null, oprData?.score ?? null,
+        ccHosts
       );
     }
   });
@@ -245,6 +278,8 @@ function buildDatabase(rows, words, tranco, majestic, cacheRows) {
     CREATE INDEX idx_majestic ON domains(majestic_rank);
     CREATE INDEX idx_wayback ON domains(wayback_count);
     CREATE INDEX idx_dns ON domains(dns_a);
+    CREATE INDEX idx_opr ON domains(opr_rank);
+    CREATE INDEX idx_cc ON domains(cc_hosts);
   `);
 
   db.exec('VACUUM;');
@@ -280,6 +315,8 @@ function buildMeta(rows, stats, totalCount) {
       word_hits: stats.word,
       tranco_hits: stats.tranco,
       majestic_hits: stats.majestic,
+      opr_hits: stats.opr,
+      cc_hits: stats.cc,
       wayback_checked: stats.waybackChecked,
       wayback_hits: stats.waybackHits,
       dns_checked: stats.dnsChecked,
@@ -306,10 +343,12 @@ async function main() {
   const allSet = new Set(allDomains);
 
   // 2. Snabba berikningar parallellt
-  const [words, tranco, majestic] = await Promise.all([
+  const [words, tranco, majestic, opr, cc] = await Promise.all([
     loadWordSet(),
     loadTrancoMap(),
-    loadMajestic()
+    loadMajestic(),
+    loadOpr(),
+    loadCc()
   ]);
 
   // 3. Rolling enrichment
@@ -333,9 +372,9 @@ async function main() {
 
   // 5. Bygg sqlite
   log(`→ Bygger SQLite med ${all.length.toLocaleString('sv-SE')} rader`);
-  const stats = buildDatabase(all, words, tranco, majestic, cacheRows);
+  const stats = buildDatabase(all, words, tranco, majestic, opr, cc, cacheRows);
 
-  log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}`);
+  log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}, opr=${stats.opr}, cc=${stats.cc}`);
   log(`  Wayback: ${stats.waybackChecked} kollade, ${stats.waybackHits} med snapshots`);
   log(`  DNS: ${stats.dnsChecked} kollade, ${stats.dnsAny} med aktiva records`);
 

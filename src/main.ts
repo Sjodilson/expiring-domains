@@ -57,6 +57,9 @@ interface Row {
   dns_mx: number | null;
   dns_ns: number | null;
   dns_checked: number;
+  opr_rank: number | null;
+  opr_score: number | null;
+  cc_hosts: number | null;
 }
 
 interface Filters {
@@ -77,6 +80,8 @@ interface Filters {
   word: boolean;
   tranco: boolean;
   majestic: boolean;
+  opr: boolean;
+  cc: boolean;
   wayback: boolean;
   dns: boolean;
   watch: boolean;
@@ -90,7 +95,7 @@ const DEFAULT_FILTERS: Filters = {
   sortKey: 'release_at', sortDir: 'asc',
   noDigit: false, noHyphen: false, onlyDigits: false, onlyLetters: false,
   palindrome: false, repeat: false, cvcv: false,
-  word: false, tranco: false, majestic: false, wayback: false, dns: false,
+  word: false, tranco: false, majestic: false, opr: false, cc: false, wayback: false, dns: false,
   watch: false, notes: false, minLen: null, maxLen: null
 };
 
@@ -119,6 +124,8 @@ const els = {
   fWord: $<HTMLInputElement>('f-word'),
   fTranco: $<HTMLInputElement>('f-tranco'),
   fMajestic: $<HTMLInputElement>('f-majestic'),
+  fOpr: $<HTMLInputElement>('f-opr'),
+  fCc: $<HTMLInputElement>('f-cc'),
   fWayback: $<HTMLInputElement>('f-wayback'),
   fDns: $<HTMLInputElement>('f-dns'),
   fWatch: $<HTMLInputElement>('f-watch'),
@@ -252,6 +259,8 @@ function readFilters(): Filters {
     word: els.fWord.checked,
     tranco: els.fTranco.checked,
     majestic: els.fMajestic.checked,
+    opr: els.fOpr.checked,
+    cc: els.fCc.checked,
     wayback: els.fWayback.checked,
     dns: els.fDns.checked,
     watch: els.fWatch.checked,
@@ -279,6 +288,8 @@ function writeFilters(f: Partial<Filters>) {
   if (f.word !== undefined) els.fWord.checked = f.word;
   if (f.tranco !== undefined) els.fTranco.checked = f.tranco;
   if (f.majestic !== undefined) els.fMajestic.checked = f.majestic;
+  if (f.opr !== undefined) els.fOpr.checked = f.opr;
+  if (f.cc !== undefined) els.fCc.checked = f.cc;
   if (f.wayback !== undefined) els.fWayback.checked = f.wayback;
   if (f.dns !== undefined) els.fDns.checked = f.dns;
   if (f.watch !== undefined) els.fWatch.checked = f.watch;
@@ -381,6 +392,8 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
   if (f.word) clauses.push('is_word = 1');
   if (f.tranco) clauses.push('tranco_rank IS NOT NULL');
   if (f.majestic) clauses.push('majestic_rank IS NOT NULL');
+  if (f.opr) clauses.push('opr_rank IS NOT NULL');
+  if (f.cc) clauses.push('cc_hosts IS NOT NULL');
   if (f.wayback) clauses.push('wayback_count > 0');
   if (f.dns) clauses.push('(dns_a = 1 OR dns_mx = 1 OR dns_ns = 1)');
   if (f.minLen != null) { clauses.push('length >= ?'); params.push(f.minLen); }
@@ -418,11 +431,13 @@ function rowFromObject(o: Record<string, unknown>): Row {
     wayback_count: num('wayback_count'),
     wayback_checked: Number(o.wayback_checked),
     dns_a: num('dns_a'), dns_mx: num('dns_mx'), dns_ns: num('dns_ns'),
-    dns_checked: Number(o.dns_checked)
+    dns_checked: Number(o.dns_checked),
+    opr_rank: num('opr_rank'), opr_score: num('opr_score'),
+    cc_hosts: num('cc_hosts')
   };
 }
 
-const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked';
+const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, opr_rank, opr_score, cc_hosts';
 
 function runCount(f: Filters): number {
   if (!db) return 0;
@@ -510,6 +525,8 @@ function signalsHtml(r: Row): string {
   if (r.is_word) out.push('<span class="sig word" title="Är ett svenskt ord">📖</span>');
   if (r.tranco_rank != null) out.push(`<span class="sig tranco" title="Tranco-rank ${r.tranco_rank.toLocaleString('sv-SE')}">⭐</span>`);
   if (r.majestic_rank != null) out.push(`<span class="sig majestic" title="Majestic-rank ${r.majestic_rank.toLocaleString('sv-SE')} · ${r.majestic_refsubnets ?? 0} ref-subnät">🔗</span>`);
+  if (r.opr_rank != null) out.push(`<span class="sig opr" title="Open PageRank #${r.opr_rank.toLocaleString('sv-SE')} · poäng ${r.opr_score ?? '?'}">📊</span>`);
+  if (r.cc_hosts != null) out.push(`<span class="sig cc" title="Common Crawl: ${r.cc_hosts} host(s)">🌐</span>`);
   if ((r.wayback_count ?? 0) > 0) out.push(`<span class="sig wayback" title="${r.wayback_count} Wayback-snapshots">⏳</span>`);
   if (r.dns_checked && (r.dns_a || r.dns_mx || r.dns_ns)) {
     const parts = [r.dns_a && 'A', r.dns_mx && 'MX', r.dns_ns && 'NS'].filter(Boolean).join(' ');
@@ -777,6 +794,8 @@ function drawerOverviewHtml(r: Row): string {
       ${signalDetail(!!r.is_word, '📖', 'Svenskt ord', r.is_word ? 'Ja, finns i ordlistan' : 'Nej')}
       ${signalDetail(r.tranco_rank != null, '⭐', 'Tranco-rank', r.tranco_rank != null ? `#${r.tranco_rank.toLocaleString('sv-SE')} av 1 000 000` : 'Inte i topp 1M')}
       ${signalDetail(r.majestic_rank != null, '🔗', 'Backlinks (Majestic)', r.majestic_rank != null ? `Rank #${r.majestic_rank.toLocaleString('sv-SE')} · ${r.majestic_refsubnets ?? 0} ref-subnät` : 'Inga registrerade backlinks')}
+      ${signalDetail(r.opr_rank != null, '📊', 'Open PageRank', r.opr_rank != null ? `Rank #${r.opr_rank.toLocaleString('sv-SE')} · poäng ${r.opr_score?.toFixed(2) ?? '?'}` : 'Inte i topp 10M')}
+      ${signalDetail(r.cc_hosts != null, '🌐', 'Common Crawl', r.cc_hosts != null ? `${r.cc_hosts} host(s) i CC web graph` : 'Finns ej i CC web graph')}
       ${signalDetail((r.wayback_count ?? 0) > 0, '⏳', 'Wayback-historik',
         r.wayback_checked
           ? ((r.wayback_count ?? 0) > 0 ? `${r.wayback_count} snapshots${wbFirst ? ` · första ${wbFirst}` : ''}` : 'Inga snapshots')
@@ -911,11 +930,11 @@ function download(filename: string, content: string, mime: string) {
 }
 function exportCsv() {
   const rows = collectAll();
-  const headers = ['name','tld','release_at','length','is_word','tranco_rank','majestic_rank','wayback_count','dns_a','dns_mx','dns_ns'];
+  const headers = ['name','tld','release_at','length','is_word','tranco_rank','majestic_rank','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns'];
   const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [headers.join(',')];
   for (const r of rows) {
-    lines.push([r.name, r.tld, r.release_at, r.length, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? ''].map(esc).join(','));
+    lines.push([r.name, r.tld, r.release_at, r.length, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? ''].map(esc).join(','));
   }
   download(`expiring-domains-${todayISO()}.csv`, lines.join('\n'), 'text/csv');
 }
