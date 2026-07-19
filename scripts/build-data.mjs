@@ -351,18 +351,30 @@ async function main() {
     loadCc()
   ]);
 
-  // 3. Rolling enrichment
+  // 3. Rolling enrichment — prioritera domäner som frisläpps snarast så att
+  // dagens batch täcker det användarna faktiskt tittar på
+  const releaseAt = new Map(all.map((r) => [r.name, r.release_at]));
+  const sortByRelease = (names) =>
+    names.sort((a, b) => (releaseAt.get(a) ?? '').localeCompare(releaseAt.get(b) ?? ''));
+  const batchSpan = (names, max) => {
+    if (!names.length) return '';
+    const last = names[Math.min(names.length, max) - 1];
+    return `${releaseAt.get(names[0])} → ${releaseAt.get(last)}`;
+  };
+
   const cache = new EnrichmentCache(CACHE_DB);
   const pruned = cache.prune(allSet);
   if (pruned > 0) log(`  Cache: rensade ${pruned} gamla rader`);
 
   if (process.env.SKIP_DNS !== '1') {
-    const need = cache.needsUpdate('dns', allDomains, DNS_REFRESH_DAYS);
+    const need = sortByRelease(cache.needsUpdate('dns', allDomains, DNS_REFRESH_DAYS));
+    if (need.length) log(`  DNS-batch täcker frisläpp ${batchSpan(need, DNS_MAX_PER_RUN)}`);
     await enrichDns(need, cache, { maxPerRun: DNS_MAX_PER_RUN, log });
   } else { warn('SKIP_DNS=1'); }
 
   if (process.env.SKIP_WAYBACK !== '1') {
-    const need = cache.needsUpdate('wayback', allDomains, WAYBACK_REFRESH_DAYS);
+    const need = sortByRelease(cache.needsUpdate('wayback', allDomains, WAYBACK_REFRESH_DAYS));
+    if (need.length) log(`  Wayback-batch täcker frisläpp ${batchSpan(need, WAYBACK_MAX_PER_RUN)}`);
     await enrichWayback(need, cache, { maxPerRun: WAYBACK_MAX_PER_RUN, log });
   } else { warn('SKIP_WAYBACK=1'); }
 
