@@ -231,6 +231,10 @@ function debounce<T extends (...args: never[]) => void>(fn: T, ms: number): T {
   let t: ReturnType<typeof setTimeout> | null = null;
   return ((...args: never[]) => { if (t) clearTimeout(t); t = setTimeout(() => fn(...args), ms); }) as T;
 }
+// Internetstiftelsens domänsök (Domänkollen) — gamla /domain/<namn>/ ger 404
+function iisSearchUrl(name: string): string {
+  return `https://internetstiftelsen.se/domaner/?lang=se&q=${encodeURIComponent(name)}`;
+}
 function todayISO(): string { return new Date().toISOString().slice(0, 10); }
 function isoPlusDays(days: number): string {
   const d = new Date(); d.setDate(d.getDate() + days);
@@ -555,7 +559,7 @@ function renderRow(idx: number, top: number): string {
       <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>`;
   }
-  const url = `https://internetstiftelsen.se/domain/${encodeURIComponent(row.name)}/`;
+  const url = iisSearchUrl(row.name);
   const siteUrl = `http://${encodeURIComponent(row.name)}`;
   const starred = watchlist.has(row.name);
   const activeCls = idx === activeIdx ? ' active' : '';
@@ -827,7 +831,7 @@ function drawerOverviewHtml(r: Row): string {
 function drawerLinksHtml(r: Row): string {
   const enc = encodeURIComponent(r.name);
   const links = [
-    { url: `https://internetstiftelsen.se/domain/${enc}/`, icon: '🌐', label: 'Internetstiftelsen WHOIS' },
+    { url: iisSearchUrl(r.name), icon: '🌐', label: 'Internetstiftelsen — sök domänen' },
     { url: `https://web.archive.org/web/*/${enc}`, icon: '⏳', label: 'Wayback Machine — historik' },
     { url: `https://web.archive.org/web/2*/${enc}`, icon: '📷', label: 'Wayback senaste snapshot' },
     { url: `https://crt.sh/?q=${enc}`, icon: '🔐', label: 'crt.sh — TLS-certifikat' },
@@ -861,7 +865,7 @@ function drawerSimilarHtml(r: Row): string {
   if (!similar.length) return '<div class="text-slate-500 italic">Inga liknande hittades.</div>';
   return `<section>
     <h3>Domäner som börjar med "${escapeHtml(r.base.slice(0, 3))}" eller slutar på "${escapeHtml(r.base.slice(-3))}"</h3>
-    <div class="similar-list">${similar.map((s) => `<a href="https://internetstiftelsen.se/domain/${encodeURIComponent(s)}/" target="_blank" rel="noopener">${escapeHtml(s)}</a>`).join('')}</div>
+    <div class="similar-list">${similar.map((s) => `<a href="${iisSearchUrl(s)}" target="_blank" rel="noopener">${escapeHtml(s)}</a>`).join('')}</div>
   </section>`;
 }
 
