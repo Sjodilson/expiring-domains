@@ -208,6 +208,10 @@ body {
   align-items: center;
   overflow: hidden;
 }
+/* Låt aldrig enskilda chips krympa — klipp hellre kolumnens slut */
+#rows .row .signals > * {
+  flex-shrink: 0;
+}
 
 #rows .row .metric {
   font-size: 0.72rem;
@@ -246,6 +250,7 @@ body {
 
 /* Status för nysläppta domäner */
 .sig.rel-free, .sig.rel-taken, .sig.rel-unknown {
+  width: auto; /* .sig har fast 18px för emoji-chips — textchips behöver naturlig bredd */
   font-size: 0.7rem;
   font-weight: 600;
   padding: 2px 6px;
