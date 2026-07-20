@@ -41,6 +41,31 @@ export class EnrichmentCache {
         );
       `);
     }
+    // Historik över domäner vi sett i karens — låter oss visa nysläppta
+    // domäner även efter att de försvunnit ur källfilen
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS karens (
+        domain           TEXT PRIMARY KEY,
+        tld              TEXT NOT NULL,
+        release_at       TEXT NOT NULL,
+        taken            INTEGER,
+        taken_at         TEXT,
+        avail_checked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_karens_release ON karens(release_at);
+    `);
+    this.upsertKarensStmt = this.db.prepare(`
+      INSERT INTO karens (domain, tld, release_at) VALUES (?, ?, ?)
+      ON CONFLICT(domain) DO UPDATE SET tld = excluded.tld, release_at = excluded.release_at
+    `);
+    this.setAvailStmt = this.db.prepare(`
+      UPDATE karens SET
+        taken = ?,
+        taken_at = CASE WHEN ? = 1 AND taken_at IS NULL THEN ? ELSE taken_at END,
+        avail_checked_at = ?
+      WHERE domain = ?
+    `);
+
     this.getStmt = this.db.prepare('SELECT * FROM enrichment WHERE domain = ?');
     this.upsertWayback = this.db.prepare(`
       INSERT INTO enrichment (domain, wayback_first, wayback_count, wayback_checked_at)
@@ -99,6 +124,31 @@ export class EnrichmentCache {
       if (r) m.set(d, r);
     }
     return m;
+  }
+
+  // Anteckna alla domäner som just nu är i karens
+  recordKarens(rows) {
+    const tx = this.db.transaction((items) => {
+      for (const r of items) this.upsertKarensStmt.run(r.name, r.tld, r.release_at);
+    });
+    tx(rows);
+  }
+
+  // Domäner vars release-datum passerat, nyaste först
+  getReleased(fromDate, toDate) {
+    return this.db
+      .prepare('SELECT * FROM karens WHERE release_at >= ? AND release_at <= ? ORDER BY release_at DESC, domain ASC')
+      .all(fromDate, toDate);
+  }
+
+  setAvailability(domain, taken) {
+    const now = new Date().toISOString();
+    this.setAvailStmt.run(taken ? 1 : 0, taken ? 1 : 0, now, now, domain);
+  }
+
+  // Släng released-rader äldre än fönstret
+  pruneKarens(beforeDate) {
+    return this.db.prepare('DELETE FROM karens WHERE release_at < ?').run(beforeDate).changes;
   }
 
   close() {

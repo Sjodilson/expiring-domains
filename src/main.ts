@@ -60,11 +60,16 @@ interface Row {
   opr_rank: number | null;
   opr_score: number | null;
   cc_hosts: number | null;
+  released: number;
+  taken: number | null;
+  taken_at: string | null;
+  avail_checked_at: string | null;
 }
 
 interface Filters {
   q: string;
   regex: boolean;
+  view: 'karens' | 'released';
   tld: string;
   from: string;
   to: string;
@@ -91,7 +96,7 @@ interface Filters {
 }
 
 const DEFAULT_FILTERS: Filters = {
-  q: '', regex: false, tld: '', from: '', to: '',
+  q: '', regex: false, view: 'karens', tld: '', from: '', to: '',
   sortKey: 'release_at', sortDir: 'asc',
   noDigit: false, noHyphen: false, onlyDigits: false, onlyLetters: false,
   palindrome: false, repeat: false, cvcv: false,
@@ -186,6 +191,7 @@ const notes: Map<string, string> = loadJson<Record<string, string>, Map<string, 
 let saved: { id: string; name: string; qs: string }[] = loadJson(SAVED_KEY, [], (v) => v as { id: string; name: string; qs: string }[]);
 
 let activeTld = '';
+let activeView: 'karens' | 'released' = 'karens';
 let activePreset: '' | 'all' | 'today' | '7d' | '30d' = '';
 let drawerTab: 'overview' | 'links' | 'similar' | 'notes' = 'overview';
 let drawerRow: Row | null = null;
@@ -248,6 +254,7 @@ function readFilters(): Filters {
   return {
     q: els.q.value.trim(),
     regex: els.regex.checked,
+    view: activeView,
     tld: activeTld,
     from: els.from.value,
     to: els.to.value,
@@ -277,6 +284,7 @@ function readFilters(): Filters {
 function writeFilters(f: Partial<Filters>) {
   if (f.q !== undefined) els.q.value = f.q;
   if (f.regex !== undefined) els.regex.checked = f.regex;
+  if (f.view !== undefined) { activeView = f.view; updateViewPills(); }
   if (f.tld !== undefined) { activeTld = f.tld; updateTldPills(); }
   if (f.from !== undefined) els.from.value = f.from;
   if (f.to !== undefined) els.to.value = f.to;
@@ -323,7 +331,7 @@ function buildOrderBy(f: Filters): string {
 // URL permalink
 // ───────────────────────────────────────────────────────────────────────────
 const SHORT_KEY: Record<string, string> = {
-  q: 'q', regex: 're', tld: 't', from: 'f', to: 'u',
+  q: 'q', regex: 're', view: 'vw', tld: 't', from: 'f', to: 'u',
   sortKey: 'sk', sortDir: 'sd',
   noDigit: 'nd', noHyphen: 'nh', onlyDigits: 'od', onlyLetters: 'ol',
   palindrome: 'pa', repeat: 'rp', cvcv: 'cv',
@@ -338,6 +346,7 @@ function filtersToQs(f: Filters): string {
   const p = new URLSearchParams();
   if (f.q) p.set(SHORT_KEY.q, f.q);
   if (f.regex) p.set(SHORT_KEY.regex, '1');
+  if (f.view !== 'karens') p.set(SHORT_KEY.view, f.view);
   if (f.tld) p.set(SHORT_KEY.tld, f.tld);
   if (f.from) p.set(SHORT_KEY.from, f.from);
   if (f.to) p.set(SHORT_KEY.to, f.to);
@@ -362,6 +371,8 @@ function qsToFilters(qs: string): Partial<Filters> {
       f[long] = isNaN(n) ? null : n;
     } else if (long === 'q' || long === 'tld' || long === 'from' || long === 'to') {
       f[long] = val;
+    } else if (long === 'view') {
+      f[long] = val === 'released' ? 'released' : 'karens';
     } else if (long === 'sortKey') {
       f[long] = val === 'name' || val === 'length' ? val : 'release_at';
     } else if (long === 'sortDir') {
@@ -385,6 +396,7 @@ function syncUrl(f: Filters) {
 function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql: string; params: SqlValue[] } {
   const clauses: string[] = [];
   const params: SqlValue[] = [];
+  clauses.push(f.view === 'released' ? 'released = 1' : 'released = 0');
   if (includeQ && f.q && !f.regex) {
     const q = f.q.toLowerCase();
     const hasWildcard = q.includes('%') || q.includes('_');
@@ -444,11 +456,15 @@ function rowFromObject(o: Record<string, unknown>): Row {
     dns_a: num('dns_a'), dns_mx: num('dns_mx'), dns_ns: num('dns_ns'),
     dns_checked: Number(o.dns_checked),
     opr_rank: num('opr_rank'), opr_score: num('opr_score'),
-    cc_hosts: num('cc_hosts')
+    cc_hosts: num('cc_hosts'),
+    released: Number(o.released),
+    taken: num('taken'),
+    taken_at: o.taken_at == null ? null : String(o.taken_at),
+    avail_checked_at: o.avail_checked_at == null ? null : String(o.avail_checked_at)
   };
 }
 
-const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, opr_rank, opr_score, cc_hosts';
+const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, opr_rank, opr_score, cc_hosts, released, taken, taken_at, avail_checked_at';
 
 function runCount(f: Filters): number {
   if (!db) return 0;
@@ -531,8 +547,21 @@ function getTotal(): number {
 // ───────────────────────────────────────────────────────────────────────────
 // Rendering
 // ───────────────────────────────────────────────────────────────────────────
+function fmtTime(iso: string | null): string {
+  return iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : '';
+}
+
+function statusChip(r: Row): string {
+  if (!r.released) return '';
+  if (r.taken === 1) return `<span class="sig rel-taken" title="Registrerad igen${r.taken_at ? ` · upptäckt ${fmtTime(r.taken_at)}` : ''}">Tagen</span>`;
+  if (r.taken === 0) return `<span class="sig rel-free" title="Inga DNS-records ännu — sannolikt ledig · kollad ${fmtTime(r.avail_checked_at)}">Ledig</span>`;
+  return '<span class="sig rel-unknown" title="Inte kollad ännu">?</span>';
+}
+
 function signalsHtml(r: Row): string {
   const out: string[] = [];
+  const status = statusChip(r);
+  if (status) out.push(status);
   if (r.is_word) out.push('<span class="sig word" title="Är ett svenskt ord">📖</span>');
   if (r.tranco_rank != null) out.push(`<span class="sig tranco" title="Tranco-rank ${r.tranco_rank.toLocaleString('sv-SE')}">⭐</span>`);
   if (r.majestic_rank != null) out.push(`<span class="sig majestic" title="Majestic-rank ${r.majestic_rank.toLocaleString('sv-SE')} · ${r.majestic_refsubnets ?? 0} ref-subnät">🔗</span>`);
@@ -693,6 +722,16 @@ function renderSortIndicators() {
   }
 }
 
+function updateViewPills() {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.view-pill')) {
+    btn.classList.toggle('active', btn.dataset.view === activeView);
+  }
+  // Datumkolumnen byter betydelse mellan vyerna
+  const dateBtn = els.thead.querySelector<HTMLButtonElement>('[data-sort="release_at"]');
+  if (dateBtn && dateBtn.childNodes[0]) {
+    dateBtn.childNodes[0].textContent = activeView === 'released' ? 'Frisläpptes ' : 'Frisläpps ';
+  }
+}
 function updateTldPills() {
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.tld-pill')) {
     btn.classList.toggle('active', btn.dataset.tld === activeTld);
@@ -792,7 +831,17 @@ function drawerOverviewHtml(r: Row): string {
   const days = Math.ceil((new Date(r.release_at).getTime() - Date.now()) / 86400000);
   const wbFirst = r.wayback_first ? `${r.wayback_first.slice(0,4)}-${r.wayback_first.slice(4,6)}-${r.wayback_first.slice(6,8)}` : null;
 
+  const releasedSection = r.released
+    ? `${signalDetail(r.taken !== 1, r.taken === 1 ? '✖' : '✔', 'Status efter frisläpp',
+        r.taken === 1
+          ? `Registrerad igen${r.taken_at ? ` · upptäckt ${fmtTime(r.taken_at)}` : ''}`
+          : r.taken === 0
+            ? `Inga DNS-records — sannolikt fortfarande ledig (kollad ${fmtTime(r.avail_checked_at)})`
+            : 'Inte kollad ännu')}`
+    : '';
+
   return `
+    ${releasedSection}
     <section class="mb-4">
       <div class="grid grid-cols-2 gap-2 mb-3">
         <button class="link-btn" data-drawer-action="star"><span>${starred ? '★' : '☆'}</span><span>${starred ? 'Sluta bevaka' : 'Bevaka'}</span></button>
@@ -946,11 +995,11 @@ function download(filename: string, content: string, mime: string) {
 }
 function exportCsv() {
   const rows = collectAll();
-  const headers = ['name','tld','release_at','length','is_word','tranco_rank','majestic_rank','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns'];
+  const headers = ['name','tld','release_at','length','is_word','tranco_rank','majestic_rank','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','released','taken'];
   const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [headers.join(',')];
   for (const r of rows) {
-    lines.push([r.name, r.tld, r.release_at, r.length, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? ''].map(esc).join(','));
+    lines.push([r.name, r.tld, r.release_at, r.length, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.released, r.taken ?? ''].map(esc).join(','));
   }
   download(`expiring-domains-${todayISO()}.csv`, lines.join('\n'), 'text/csv');
 }
@@ -985,11 +1034,13 @@ function resetAll(doRefresh = true) {
 // ───────────────────────────────────────────────────────────────────────────
 function applyDatePreset(p: typeof activePreset) {
   activePreset = p;
+  // I Nysläppta-vyn pekar intervallen bakåt i tiden
+  const back = activeView === 'released';
   switch (p) {
     case 'all': writeFilters({ from: '', to: '' }); break;
     case 'today': writeFilters({ from: todayISO(), to: todayISO() }); break;
-    case '7d': writeFilters({ from: todayISO(), to: isoPlusDays(7) }); break;
-    case '30d': writeFilters({ from: todayISO(), to: isoPlusDays(30) }); break;
+    case '7d': writeFilters(back ? { from: isoPlusDays(-7), to: todayISO() } : { from: todayISO(), to: isoPlusDays(7) }); break;
+    case '30d': writeFilters(back ? { from: isoPlusDays(-30), to: todayISO() } : { from: todayISO(), to: isoPlusDays(30) }); break;
     default: break;
   }
   updateDatePresets();
@@ -1062,6 +1113,25 @@ function wireUi() {
   // Sök
   els.q.addEventListener('input', debouncedRefresh);
   els.regex.addEventListener('change', refresh);
+
+  // Vy
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.view-pill')) {
+    btn.addEventListener('click', () => {
+      const v = (btn.dataset.view as typeof activeView) || 'karens';
+      if (v === activeView) return;
+      activeView = v;
+      // Nysläppta: nyast först; karens: närmast i tid först
+      currentSort.key = 'release_at';
+      currentSort.dir = v === 'released' ? 'desc' : 'asc';
+      // Datumintervall från andra vyn pekar åt fel håll — nollställ
+      activePreset = '';
+      updateDatePresets();
+      writeFilters({ from: '', to: '' });
+      els.dateCustom.classList.add('hidden');
+      updateViewPills();
+      refresh();
+    });
+  }
 
   // TLD
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.tld-pill')) {
@@ -1245,7 +1315,9 @@ async function main() {
 
     const fromUrl = qsToFilters(location.search.replace(/^\?/, ''));
     if (Object.keys(fromUrl).length) writeFilters(fromUrl);
+    if (fromUrl.view === 'released' && !fromUrl.sortDir) currentSort.dir = 'desc';
     updateTldPills();
+    updateViewPills();
     if (fromUrl.from || fromUrl.to) els.dateCustom.classList.remove('hidden');
 
     wireUi();

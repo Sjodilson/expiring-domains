@@ -15,22 +15,27 @@ body {
   outline-offset: -2px;
 }
 
-/* TLD-pills */
-.tld-pill {
+/* TLD-pills + vy-pills */
+.tld-pill,
+.view-pill {
   background: white;
   color: rgb(71 85 105);
 }
-.dark .tld-pill {
+.dark .tld-pill,
+.dark .view-pill {
   background: rgb(15 23 42);
   color: rgb(203 213 225);
 }
-.tld-pill:hover {
+.tld-pill:hover,
+.view-pill:hover {
   background: rgb(241 245 249);
 }
-.dark .tld-pill:hover {
+.dark .tld-pill:hover,
+.dark .view-pill:hover {
   background: rgb(30 41 59);
 }
-.tld-pill.active {
+.tld-pill.active,
+.view-pill.active {
   background: rgb(59 130 246);
   color: white;
 }
@@ -238,6 +243,22 @@ body {
 .dark .sig.wayback { background: rgb(22 78 99 / 0.5); color: rgb(207 250 254); }
 .sig.dns { background: rgb(254 226 226); color: rgb(153 27 27); }
 .dark .sig.dns { background: rgb(127 29 29 / 0.5); color: rgb(254 226 226); }
+
+/* Status för nysläppta domäner */
+.sig.rel-free, .sig.rel-taken, .sig.rel-unknown {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.sig.rel-free { background: rgb(220 252 231); color: rgb(22 101 52); }
+.dark .sig.rel-free { background: rgb(20 83 45 / 0.6); color: rgb(187 247 208); }
+.sig.rel-taken { background: rgb(254 226 226); color: rgb(153 27 27); }
+.dark .sig.rel-taken { background: rgb(127 29 29 / 0.6); color: rgb(254 202 202); }
+.sig.rel-unknown { background: rgb(241 245 249); color: rgb(100 116 139); }
+.dark .sig.rel-unknown { background: rgb(30 41 59); color: rgb(148 163 184); }
 
 #rows .row .len,
 #rows .row .date {

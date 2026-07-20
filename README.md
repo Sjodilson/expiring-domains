@@ -11,7 +11,9 @@ webbläsaren via en SQLite-databas (sql.js) — inga uppgifter skickas vidare.
 - Sortera på datum, namn eller längd
 - Virtuell scroll — hanterar hundratusentals rader smidigt
 - Direktlänk till Internetstiftelsens uppslag per domän
-- Uppdateras dagligen via GitHub Actions
+- Nysläppta-vy: domäner frisläppta senaste dygnen med status om de
+  registrerats igen (DNS-koll) eller sannolikt är lediga
+- Uppdateras varje timme via GitHub Actions (full berikning kl 05 UTC)
 
 ## Kör lokalt
 
@@ -31,7 +33,10 @@ npm run preview
 ## Deploy
 
 Workflowen i [.github/workflows/deploy.yml](.github/workflows/deploy.yml) bygger
-och deployar till GitHub Pages dagligen kl. 05:00 UTC samt vid push till `main`.
+och deployar till GitHub Pages varje timme samt vid push till `main`. De
+timvisa körningarna uppdaterar nysläppta domäner och deras
+tillgänglighetsstatus med en lätt berikningsbudget; den fulla berikningen
+(Wayback + stor DNS-batch) körs i 05-körningen (UTC).
 
 Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 

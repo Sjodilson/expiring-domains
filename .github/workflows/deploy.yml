@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
   schedule:
-    # Dagligen 05:00 UTC (~07:00 svensk tid)
-    - cron: '0 5 * * *'
+    # Varje timme — full berikning körs bara i 05-körningen (se budgetsteget)
+    - cron: '10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -42,12 +42,20 @@ jobs:
           restore-keys: |
             enrichment-
 
+      # Timvisa körningar uppdaterar nysläppta + tillgänglighet med lätt budget;
+      # den fulla berikningen (Wayback + stor DNS-batch) körs kl 05 UTC
+      - name: Choose enrichment budget
+        run: |
+          if [ "$(date -u +%H)" = "05" ]; then
+            echo "WAYBACK_MAX=1000" >> "$GITHUB_ENV"
+            echo "DNS_MAX=10000" >> "$GITHUB_ENV"
+          else
+            echo "WAYBACK_MAX=0" >> "$GITHUB_ENV"
+            echo "DNS_MAX=1000" >> "$GITHUB_ENV"
+          fi
+
       - name: Fetch data and build SQLite
         run: npm run build:data
-        env:
-          # Mängd domäner att berika per körning (resten görs nästa dag)
-          WAYBACK_MAX: '1000'
-          DNS_MAX: '10000'
 
       - name: Save enrichment cache
         if: always()

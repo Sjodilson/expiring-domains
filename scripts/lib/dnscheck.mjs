@@ -36,6 +36,23 @@ async function lookupOne(domain) {
   return { a, mx, ns };
 }
 
+// Kollar om nysläppta domäner registrerats igen (aktiva DNS-records = tagen).
+// Redan tagna domäner kollas inte om.
+export async function checkAvailability(released, cache, { log }) {
+  const todo = released.filter((r) => r.taken !== 1).map((r) => r.domain);
+  if (todo.length === 0) return { checked: 0, taken: 0 };
+  log(`  Tillgänglighet: kollar ${todo.length.toLocaleString('sv-SE')} nysläppta domäner`);
+  let taken = 0;
+  await runPool(todo, CONCURRENCY, async (domain) => {
+    const r = await lookupOne(domain);
+    const isTaken = r.a || r.mx || r.ns;
+    if (isTaken) taken++;
+    cache.setAvailability(domain, isTaken);
+  });
+  log(`  Tillgänglighet: ${taken} nyregistrerade av ${todo.length} kollade`);
+  return { checked: todo.length, taken };
+}
+
 export async function enrichDns(domains, cache, { maxPerRun, log }) {
   if (domains.length === 0) return { processed: 0 };
   const todo = domains.slice(0, maxPerRun);

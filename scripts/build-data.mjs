@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { fetchJson, fetchText, fetchBuffer } from './lib/util.mjs';
 import { EnrichmentCache } from './lib/cache.mjs';
 import { enrichWayback } from './lib/wayback.mjs';
-import { enrichDns } from './lib/dnscheck.mjs';
+import { enrichDns, checkAvailability } from './lib/dnscheck.mjs';
 import { loadMajesticMap } from './lib/backlinks.mjs';
 import { loadOpenPageRankMap } from './lib/openpagerank.mjs';
 import { loadCcDomainMap } from './lib/commoncrawl.mjs';
@@ -40,6 +40,8 @@ const WAYBACK_MAX_PER_RUN = parseInt(process.env.WAYBACK_MAX || '2000', 10);
 const WAYBACK_REFRESH_DAYS = parseInt(process.env.WAYBACK_REFRESH_DAYS || '30', 10);
 const DNS_MAX_PER_RUN = parseInt(process.env.DNS_MAX || '8000', 10);
 const DNS_REFRESH_DAYS = parseInt(process.env.DNS_REFRESH_DAYS || '14', 10);
+// Hur många dagar bakåt nysläppta domäner visas med tillgänglighetsstatus
+const RELEASED_DAYS = parseInt(process.env.RELEASED_DAYS || '3', 10);
 
 const VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö']);
 
@@ -186,7 +188,11 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       dns_checked       INTEGER NOT NULL,
       opr_rank          INTEGER,
       opr_score         REAL,
-      cc_hosts          INTEGER
+      cc_hosts          INTEGER,
+      released          INTEGER NOT NULL DEFAULT 0,
+      taken             INTEGER,
+      taken_at          TEXT,
+      avail_checked_at  TEXT
     );
   `);
 
@@ -198,8 +204,9 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       tranco_rank, majestic_rank, majestic_refsubnets,
       wayback_first, wayback_count, wayback_checked,
       dns_a, dns_mx, dns_ns, dns_checked,
-      opr_rank, opr_score, cc_hosts
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      opr_rank, opr_score, cc_hosts,
+      released, taken, taken_at, avail_checked_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const stats = {
@@ -260,7 +267,8 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         wbFirst, wbCount, wbChecked,
         dnsA, dnsMx, dnsNs, dnsChecked,
         oprData?.rank ?? null, oprData?.score ?? null,
-        ccHosts
+        ccHosts,
+        r.released ?? 0, r.taken ?? null, r.taken_at ?? null, r.avail_checked_at ?? null
       );
     }
   });
@@ -280,6 +288,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
     CREATE INDEX idx_dns ON domains(dns_a);
     CREATE INDEX idx_opr ON domains(opr_rank);
     CREATE INDEX idx_cc ON domains(cc_hosts);
+    CREATE INDEX idx_released ON domains(released, release_at);
   `);
 
   db.exec('VACUUM;');
@@ -340,7 +349,10 @@ async function main() {
     log(`  ${rows.length.toLocaleString('sv-SE')} domäner från .${src.tld}`);
   }
   const allDomains = all.map((r) => r.name);
-  const allSet = new Set(allDomains);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const releasedFrom = new Date(Date.now() - RELEASED_DAYS * 86400000).toISOString().slice(0, 10);
+  // Kvar i karens = release-datumet har inte passerat ännu
+  const future = all.filter((r) => r.release_at > todayStr);
 
   // 2. Snabba berikningar parallellt
   const [words, tranco, majestic, opr, cc] = await Promise.all([
@@ -357,13 +369,29 @@ async function main() {
   const sortByRelease = (names) =>
     names.sort((a, b) => (releaseAt.get(a) ?? '').localeCompare(releaseAt.get(b) ?? ''));
   const batchSpan = (names, max) => {
-    if (!names.length) return '';
-    const last = names[Math.min(names.length, max) - 1];
-    return `${releaseAt.get(names[0])} → ${releaseAt.get(last)}`;
+    const n = Math.min(names.length, Math.max(0, max));
+    if (!n) return 'ingen (batch=0)';
+    return `${releaseAt.get(names[0])} → ${releaseAt.get(names[n - 1])}`;
   };
 
   const cache = new EnrichmentCache(CACHE_DB);
-  const pruned = cache.prune(allSet);
+
+  // Nysläppta: anteckna dagens karensdata, kolla om frisläppta domäner tagits
+  cache.recordKarens(all);
+  cache.pruneKarens(releasedFrom);
+  let released = cache.getReleased(releasedFrom, todayStr);
+  log(`  Nysläppta: ${released.length.toLocaleString('sv-SE')} domäner i fönstret ${releasedFrom} → ${todayStr}`);
+  if (process.env.SKIP_AVAIL !== '1' && released.length) {
+    await checkAvailability(released, cache, { log });
+    released = cache.getReleased(releasedFrom, todayStr);
+  } else if (process.env.SKIP_AVAIL === '1') { warn('SKIP_AVAIL=1'); }
+  const releasedRows = released.map((r) => ({
+    name: r.domain, tld: r.tld, release_at: r.release_at,
+    released: 1, taken: r.taken, taken_at: r.taken_at, avail_checked_at: r.avail_checked_at
+  }));
+  const releasedNames = releasedRows.map((r) => r.name);
+
+  const pruned = cache.prune(new Set([...allDomains, ...releasedNames]));
   if (pruned > 0) log(`  Cache: rensade ${pruned} gamla rader`);
 
   if (process.env.SKIP_DNS !== '1') {
@@ -379,18 +407,29 @@ async function main() {
   } else { warn('SKIP_WAYBACK=1'); }
 
   // 4. Hämta cachade berikningar för alla aktuella domäner
-  const cacheRows = cache.getMany(allDomains);
+  const cacheRows = cache.getMany([...allDomains, ...releasedNames]);
   cache.close();
 
-  // 5. Bygg sqlite
-  log(`→ Bygger SQLite med ${all.length.toLocaleString('sv-SE')} rader`);
-  const stats = buildDatabase(all, words, tranco, majestic, opr, cc, cacheRows);
+  // 5. Bygg sqlite — karensdomäner + nysläppta i samma tabell
+  const dbRows = [
+    ...releasedRows,
+    ...future.map((r) => ({ ...r, released: 0, taken: null, taken_at: null, avail_checked_at: null }))
+  ];
+  log(`→ Bygger SQLite med ${dbRows.length.toLocaleString('sv-SE')} rader (${releasedRows.length} nysläppta)`);
+  const stats = buildDatabase(dbRows, words, tranco, majestic, opr, cc, cacheRows);
 
   log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}, opr=${stats.opr}, cc=${stats.cc}`);
   log(`  Wayback: ${stats.waybackChecked} kollade, ${stats.waybackHits} med snapshots`);
   log(`  DNS: ${stats.dnsChecked} kollade, ${stats.dnsAny} med aktiva records`);
 
-  const meta = buildMeta(all, stats, all.length);
+  const meta = buildMeta(future, stats, all.length);
+  meta.released = {
+    window_days: RELEASED_DAYS,
+    total: releasedRows.length,
+    taken: releasedRows.filter((r) => r.taken === 1).length,
+    free: releasedRows.filter((r) => r.taken === 0).length,
+    unchecked: releasedRows.filter((r) => r.taken == null).length
+  };
   writeFileSync(META_PATH, JSON.stringify(meta, null, 2), 'utf8');
 
   const sizeMB = (statSync(DB_PATH).size / 1024 / 1024).toFixed(2);
