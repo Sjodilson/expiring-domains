@@ -556,10 +556,12 @@ function renderRow(idx: number, top: number): string {
     </div>`;
   }
   const url = `https://internetstiftelsen.se/domain/${encodeURIComponent(row.name)}/`;
+  const siteUrl = `http://${encodeURIComponent(row.name)}`;
   const starred = watchlist.has(row.name);
   const activeCls = idx === activeIdx ? ' active' : '';
   return `<div class="row${activeCls}" data-idx="${idx}" style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_HEIGHT}px;">
     <button class="star${starred ? ' active' : ''}" data-action="star" title="Bevaka (s)">${starred ? '★' : '☆'}</button>
+    <a class="visit" href="${siteUrl}" target="_blank" rel="noopener" data-action="open" title="Öppna sajten i ny flik">↗</a>
     <a class="name" href="${url}" target="_blank" rel="noopener" data-action="open">${escapeHtml(row.name)}</a>
     <span class="signals">${signalsHtml(row)}</span>
     <span class="len">${row.length}</span>
