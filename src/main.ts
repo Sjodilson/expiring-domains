@@ -28,6 +28,7 @@ interface Meta {
     wayback_hits?: number;
     dns_checked?: number;
     dns_active?: number;
+    dns_errors?: number;
     coverage_wayback?: number;
     coverage_dns?: number;
   };
@@ -57,23 +58,35 @@ interface Row {
   dns_mx: number | null;
   dns_ns: number | null;
   dns_checked: number;
+  dns_status: string | null;
+  dns_error: string | null;
   opr_rank: number | null;
   opr_score: number | null;
   cc_hosts: number | null;
+  score_brand: number;
+  score_authority: number;
+  score_demand: number;
+  score_risk: number;
+  score_total: number;
   released: number;
   taken: number | null;
   taken_at: string | null;
   avail_checked_at: string | null;
+  availability_status: string | null;
+  availability_error: string | null;
 }
+
+type View = 'karens' | 'released' | 'upcoming' | 'free';
+type SortKey = 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score' | 'score_total';
 
 interface Filters {
   q: string;
   regex: boolean;
-  view: 'karens' | 'released';
+  view: View;
   tld: string;
   from: string;
   to: string;
-  sortKey: 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score';
+  sortKey: SortKey;
   sortDir: 'asc' | 'desc';
   noDigit: boolean;
   noHyphen: boolean;
@@ -191,7 +204,7 @@ const notes: Map<string, string> = loadJson<Record<string, string>, Map<string, 
 let saved: { id: string; name: string; qs: string }[] = loadJson(SAVED_KEY, [], (v) => v as { id: string; name: string; qs: string }[]);
 
 let activeTld = '';
-let activeView: 'karens' | 'released' = 'karens';
+let activeView: View = 'karens';
 let activePreset: '' | 'all' | 'today' | '7d' | '30d' = '';
 let drawerTab: 'overview' | 'links' | 'similar' | 'notes' = 'overview';
 let drawerRow: Row | null = null;
@@ -324,6 +337,7 @@ function buildOrderBy(f: Filters): string {
   if (f.sortKey === 'opr_score') {
     return `CASE WHEN opr_score IS NULL THEN 1 ELSE 0 END, opr_score ${dir}, name ASC`;
   }
+  if (f.sortKey === 'score_total') return `score_total ${dir}, score_authority DESC, name ASC`;
   return `release_at ${dir}, name ASC`;
 }
 
@@ -352,7 +366,7 @@ function filtersToQs(f: Filters): string {
   if (f.to) p.set(SHORT_KEY.to, f.to);
   if (f.sortKey !== 'release_at') p.set(SHORT_KEY.sortKey, f.sortKey);
   if (f.sortDir !== 'asc') p.set(SHORT_KEY.sortDir, f.sortDir);
-  for (const k of ['noDigit','noHyphen','onlyDigits','onlyLetters','palindrome','repeat','cvcv','word','tranco','majestic','wayback','dns','watch','notes'] as const) {
+  for (const k of ['noDigit','noHyphen','onlyDigits','onlyLetters','palindrome','repeat','cvcv','word','tranco','majestic','opr','cc','wayback','dns','watch','notes'] as const) {
     if (f[k]) p.set(SHORT_KEY[k], '1');
   }
   if (f.minLen != null) p.set(SHORT_KEY.minLen, String(f.minLen));
@@ -372,9 +386,9 @@ function qsToFilters(qs: string): Partial<Filters> {
     } else if (long === 'q' || long === 'tld' || long === 'from' || long === 'to') {
       f[long] = val;
     } else if (long === 'view') {
-      f[long] = val === 'released' ? 'released' : 'karens';
+      f[long] = val === 'released' || val === 'upcoming' || val === 'free' ? val : 'karens';
     } else if (long === 'sortKey') {
-      f[long] = val === 'name' || val === 'length' ? val : 'release_at';
+      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total'].includes(val) ? val : 'release_at';
     } else if (long === 'sortDir') {
       f[long] = val === 'desc' ? 'desc' : 'asc';
     } else {
@@ -396,7 +410,15 @@ function syncUrl(f: Filters) {
 function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql: string; params: SqlValue[] } {
   const clauses: string[] = [];
   const params: SqlValue[] = [];
-  clauses.push(f.view === 'released' ? 'released = 1' : 'released = 0');
+  if (f.view === 'released') clauses.push('released = 1');
+  else if (f.view === 'upcoming') {
+    clauses.push('released = 0');
+    clauses.push("release_at >= date('now') AND release_at <= date('now', '+1 day')");
+  } else if (f.view === 'free') {
+    clauses.push("released = 1 AND taken = 0 AND availability_status = 'free'");
+  } else {
+    clauses.push('released = 0');
+  }
   if (includeQ && f.q && !f.regex) {
     const q = f.q.toLowerCase();
     const hasWildcard = q.includes('%') || q.includes('_');
@@ -455,16 +477,23 @@ function rowFromObject(o: Record<string, unknown>): Row {
     wayback_checked: Number(o.wayback_checked),
     dns_a: num('dns_a'), dns_mx: num('dns_mx'), dns_ns: num('dns_ns'),
     dns_checked: Number(o.dns_checked),
+    dns_status: o.dns_status == null ? null : String(o.dns_status),
+    dns_error: o.dns_error == null ? null : String(o.dns_error),
     opr_rank: num('opr_rank'), opr_score: num('opr_score'),
     cc_hosts: num('cc_hosts'),
+    score_brand: Number(o.score_brand), score_authority: Number(o.score_authority),
+    score_demand: Number(o.score_demand), score_risk: Number(o.score_risk),
+    score_total: Number(o.score_total),
     released: Number(o.released),
     taken: num('taken'),
     taken_at: o.taken_at == null ? null : String(o.taken_at),
-    avail_checked_at: o.avail_checked_at == null ? null : String(o.avail_checked_at)
+    avail_checked_at: o.avail_checked_at == null ? null : String(o.avail_checked_at),
+    availability_status: o.availability_status == null ? null : String(o.availability_status),
+    availability_error: o.availability_error == null ? null : String(o.availability_error)
   };
 }
 
-const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, opr_rank, opr_score, cc_hosts, released, taken, taken_at, avail_checked_at';
+const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error, opr_rank, opr_score, cc_hosts, score_brand, score_authority, score_demand, score_risk, score_total, released, taken, taken_at, avail_checked_at, availability_status, availability_error';
 
 function runCount(f: Filters): number {
   if (!db) return 0;
@@ -515,7 +544,8 @@ function runHistogram(f: Filters): Array<[number, number]> {
 function runDateBar(f: Filters, limit: number): Array<[string, number]> {
   if (!db) return [];
   const { sql, params } = buildWhere(f, true, true);
-  const stmt = db.prepare(`SELECT release_at AS d, COUNT(*) AS c FROM domains ${sql} GROUP BY release_at ORDER BY release_at LIMIT ?`);
+  const dir = f.view === 'released' || f.view === 'free' ? 'DESC' : 'ASC';
+  const stmt = db.prepare(`SELECT release_at AS d, COUNT(*) AS c FROM domains ${sql} GROUP BY release_at ORDER BY release_at ${dir} LIMIT ?`);
   stmt.bind([...params, limit]);
   const out: Array<[string, number]> = [];
   while (stmt.step()) {
@@ -553,13 +583,30 @@ function fmtTime(iso: string | null): string {
 
 function statusChip(r: Row): string {
   if (!r.released) return '';
-  if (r.taken === 1) return `<span class="sig rel-taken" title="Registrerad igen${r.taken_at ? ` · upptäckt ${fmtTime(r.taken_at)}` : ''}">Tagen</span>`;
-  if (r.taken === 0) return `<span class="sig rel-free" title="Inga DNS-records ännu — sannolikt ledig · kollad ${fmtTime(r.avail_checked_at)}">Ledig</span>`;
+  if (r.availability_status === 'error') {
+    return `<span class="sig rel-error" title="Tillgänglighetskontrollen misslyckades${r.availability_error ? ` · ${escapeHtml(r.availability_error)}` : ''}">Kontrollfel</span>`;
+  }
+  if (r.availability_status === 'occupied' || r.taken === 1) {
+    return `<span class="sig rel-taken" title="Registrerad igen${r.taken_at ? ` · upptäckt ${fmtTime(r.taken_at)}` : ''}">Tagen</span>`;
+  }
+  if (r.availability_status === 'free') {
+    return `<span class="sig rel-free" title="Bekräftat ledig av Internetstiftelsens DAS · kollad ${fmtTime(r.avail_checked_at)}">Ledig</span>`;
+  }
+  if (r.taken === 0) return `<span class="sig rel-unknown" title="Äldre DNS-baserad status väntar på registerkontroll">Obekräftad</span>`;
   return '<span class="sig rel-unknown" title="Inte kollad ännu">?</span>';
+}
+
+function scoreChips(r: Row): string {
+  return `<span class="score total" title="Guldkornspoäng: ${r.score_total}/100">💎 ${r.score_total}</span>` +
+    `<span class="score brand" title="Varumärkespoäng: ${r.score_brand}/100">V${r.score_brand}</span>` +
+    `<span class="score authority" title="SEO- och historikpoäng: ${r.score_authority}/100">S${r.score_authority}</span>` +
+    `<span class="score demand" title="Indikativ efterfrågan: ${r.score_demand}/100">E${r.score_demand}</span>` +
+    `<span class="score risk" title="Riskpoäng: ${r.score_risk}/100 (lägre är bättre)">R${r.score_risk}</span>`;
 }
 
 function signalsHtml(r: Row): string {
   const out: string[] = [];
+  out.push(scoreChips(r));
   const status = statusChip(r);
   if (status) out.push(status);
   if (r.is_word) out.push('<span class="sig word" title="Är ett svenskt ord">📖</span>');
@@ -572,6 +619,7 @@ function signalsHtml(r: Row): string {
     const parts = [r.dns_a && 'A', r.dns_mx && 'MX', r.dns_ns && 'NS'].filter(Boolean).join(' ');
     out.push(`<span class="sig dns" title="Aktiva DNS-records: ${parts}">📡</span>`);
   }
+  if (r.dns_status === 'error') out.push(`<span class="sig dns-error" title="DNS-kontrollfel${r.dns_error ? `: ${escapeHtml(r.dns_error)}` : ''}">!</span>`);
   if (r.is_palindrome) out.push('<span class="sig" title="Palindrom">↔</span>');
   if (r.is_cvcv) out.push('<span class="sig" title="Uttalbart CVCV-mönster">🗣</span>');
   if (notes.has(r.name)) out.push('<span class="sig" title="Har anteckning">📝</span>');
@@ -673,7 +721,7 @@ function renderActivePills() {
   const propLabels: Record<string, string> = {
     noDigit: 'inga siffror', noHyphen: 'inga bindestreck', onlyDigits: 'endast siffror', onlyLetters: 'endast bokstäver',
     palindrome: 'palindrom', repeat: 'upprepning', cvcv: 'uttalbart',
-    word: '📖 ord', tranco: '⭐ Tranco', majestic: '🔗 backlinks', wayback: '⏳ wayback', dns: '📡 dns',
+    word: '📖 ord', tranco: '⭐ Tranco', majestic: '🔗 backlinks', opr: '📊 OPR', cc: '🌐 Common Crawl', wayback: '⏳ wayback', dns: '📡 dns',
     watch: '🔖 bevakade', notes: '📝 antecknade'
   };
   for (const k of Object.keys(propLabels) as (keyof Filters)[]) {
@@ -702,7 +750,7 @@ function renderBadges() {
   // Räkna props/qual som är aktiva för att visa siffra på popover-knapp
   const f = readFilters();
   const propsActive = [f.noDigit, f.noHyphen, f.onlyDigits, f.onlyLetters, f.palindrome, f.repeat, f.cvcv, f.minLen != null, f.maxLen != null].filter(Boolean).length;
-  const qualActive = [f.word, f.tranco, f.majestic, f.wayback, f.dns, f.watch, f.notes].filter(Boolean).length;
+  const qualActive = [f.word, f.tranco, f.majestic, f.opr, f.cc, f.wayback, f.dns, f.watch, f.notes].filter(Boolean).length;
   if (propsActive) { els.propsBadge.textContent = String(propsActive); els.propsBadge.classList.remove('hidden'); els.propsBtn.classList.add('active'); }
   else { els.propsBadge.classList.add('hidden'); els.propsBtn.classList.remove('active'); }
   if (qualActive) { els.qualBadge.textContent = String(qualActive); els.qualBadge.classList.remove('hidden'); els.qualBtn.classList.add('active'); }
@@ -729,7 +777,7 @@ function updateViewPills() {
   // Datumkolumnen byter betydelse mellan vyerna
   const dateBtn = els.thead.querySelector<HTMLButtonElement>('[data-sort="release_at"]');
   if (dateBtn && dateBtn.childNodes[0]) {
-    dateBtn.childNodes[0].textContent = activeView === 'released' ? 'Frisläpptes ' : 'Frisläpps ';
+    dateBtn.childNodes[0].textContent = activeView === 'released' || activeView === 'free' ? 'Frisläpptes ' : 'Frisläpps ';
   }
 }
 function updateTldPills() {
@@ -826,22 +874,49 @@ function signalDetail(active: boolean, icon: string, label: string, value: strin
   return `<div class="signal-detail${active ? '' : ' dim'}"><span class="icon">${icon}</span><div><div>${label}</div><div class="text-slate-500 text-xs">${value}</div></div></div>`;
 }
 
+function scoreDetail(label: string, value: number, kind: 'brand' | 'authority' | 'demand' | 'risk', note: string): string {
+  return `<div class="score-detail ${kind}">
+    <div class="score-head"><span>${label}</span><strong>${value}/100</strong></div>
+    <div class="score-track"><span style="width:${value}%"></span></div>
+    <div class="text-slate-500 text-xs mt-1">${note}</div>
+  </div>`;
+}
+
 function drawerOverviewHtml(r: Row): string {
   const starred = watchlist.has(r.name);
   const days = Math.ceil((new Date(r.release_at).getTime() - Date.now()) / 86400000);
   const wbFirst = r.wayback_first ? `${r.wayback_first.slice(0,4)}-${r.wayback_first.slice(4,6)}-${r.wayback_first.slice(6,8)}` : null;
+  const dnsActive = !!(r.dns_a || r.dns_mx || r.dns_ns);
+  const dnsParts = [r.dns_a && 'A', r.dns_mx && 'MX', r.dns_ns && 'NS'].filter(Boolean).join(', ');
+  const dnsValue = dnsActive
+    ? `${dnsParts}${r.dns_status === 'partial' ? ` · delvis kontrollfel${r.dns_error ? ` (${escapeHtml(r.dns_error)})` : ''}` : ''}`
+    : r.dns_status === 'error'
+      ? `Kontrollfel${r.dns_error ? `: ${escapeHtml(r.dns_error)}` : ''}`
+      : r.dns_checked ? 'Inga records' : 'Inte kollat ännu';
 
   const releasedSection = r.released
-    ? `${signalDetail(r.taken !== 1, r.taken === 1 ? '✖' : '✔', 'Status efter frisläpp',
-        r.taken === 1
+    ? `${signalDetail(r.availability_status === 'free', r.availability_status === 'free' ? '✔' : r.availability_status === 'error' ? '⚠' : '✖', 'Registerstatus efter frisläpp',
+        r.availability_status === 'occupied' || r.taken === 1
           ? `Registrerad igen${r.taken_at ? ` · upptäckt ${fmtTime(r.taken_at)}` : ''}`
-          : r.taken === 0
-            ? `Inga DNS-records — sannolikt fortfarande ledig (kollad ${fmtTime(r.avail_checked_at)})`
-            : 'Inte kollad ännu')}`
+          : r.availability_status === 'free'
+            ? `Bekräftat ledig av Internetstiftelsens DAS (kollad ${fmtTime(r.avail_checked_at)})`
+            : r.availability_status === 'error'
+              ? `Kontrollfel${r.availability_error ? `: ${escapeHtml(r.availability_error)}` : ''}`
+              : 'Väntar på registerkontroll')}`
     : '';
 
   return `
     ${releasedSection}
+    <section class="mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="mb-0">Guldkornspoäng</h3>
+        <strong class="gem-total">💎 ${r.score_total}/100</strong>
+      </div>
+      ${scoreDetail('Varumärke', r.score_brand, 'brand', 'Längd, stavning, ordträff och uttalbarhet')}
+      ${scoreDetail('SEO & historik', r.score_authority, 'authority', 'Länkar, PageRank, arkivålder och crawl-data')}
+      ${scoreDetail('Efterfrågan', r.score_demand, 'demand', 'Indikativ potential från ord- och popularitetssignaler')}
+      ${scoreDetail('Risk', r.score_risk, 'risk', 'Lägre är bättre · teknisk och namnbaserad risk')}
+    </section>
     <section class="mb-4">
       <div class="grid grid-cols-2 gap-2 mb-3">
         <button class="link-btn" data-drawer-action="star"><span>${starred ? '★' : '☆'}</span><span>${starred ? 'Sluta bevaka' : 'Bevaka'}</span></button>
@@ -866,11 +941,7 @@ function drawerOverviewHtml(r: Row): string {
           ? ((r.wayback_count ?? 0) > 0 ? `${r.wayback_count} snapshots${wbFirst ? ` · första ${wbFirst}` : ''}` : 'Inga snapshots')
           : 'Inte kollat ännu (kommer i nästa build)'
       )}
-      ${signalDetail(!!(r.dns_a || r.dns_mx || r.dns_ns), '📡', 'Aktiva DNS-records',
-        r.dns_checked
-          ? ((r.dns_a || r.dns_mx || r.dns_ns) ? [r.dns_a && 'A', r.dns_mx && 'MX', r.dns_ns && 'NS'].filter(Boolean).join(', ') : 'Inga records')
-          : 'Inte kollat ännu'
-      )}
+      ${signalDetail(dnsActive, '📡', 'Aktiva DNS-records', dnsValue)}
       ${signalDetail(!!r.is_palindrome, '↔', 'Palindrom', r.is_palindrome ? 'Ja' : 'Nej')}
       ${signalDetail(!!r.is_cvcv, '🗣', 'Uttalbart (CVCV)', r.is_cvcv ? 'Ja' : 'Nej')}
     </section>
@@ -995,11 +1066,11 @@ function download(filename: string, content: string, mime: string) {
 }
 function exportCsv() {
   const rows = collectAll();
-  const headers = ['name','tld','release_at','length','is_word','tranco_rank','majestic_rank','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','released','taken'];
+  const headers = ['name','tld','release_at','length','score_total','score_brand','score_authority','score_demand','score_risk','is_word','tranco_rank','majestic_rank','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','dns_status','released','taken','availability_status'];
   const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [headers.join(',')];
   for (const r of rows) {
-    lines.push([r.name, r.tld, r.release_at, r.length, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.released, r.taken ?? ''].map(esc).join(','));
+    lines.push([r.name, r.tld, r.release_at, r.length, r.score_total, r.score_brand, r.score_authority, r.score_demand, r.score_risk, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.dns_status ?? '', r.released, r.taken ?? '', r.availability_status ?? ''].map(esc).join(','));
   }
   download(`expiring-domains-${todayISO()}.csv`, lines.join('\n'), 'text/csv');
 }
@@ -1035,7 +1106,7 @@ function resetAll(doRefresh = true) {
 function applyDatePreset(p: typeof activePreset) {
   activePreset = p;
   // I Nysläppta-vyn pekar intervallen bakåt i tiden
-  const back = activeView === 'released';
+  const back = activeView === 'released' || activeView === 'free';
   switch (p) {
     case 'all': writeFilters({ from: '', to: '' }); break;
     case 'today': writeFilters({ from: todayISO(), to: todayISO() }); break;
@@ -1120,9 +1191,9 @@ function wireUi() {
       const v = (btn.dataset.view as typeof activeView) || 'karens';
       if (v === activeView) return;
       activeView = v;
-      // Nysläppta: nyast först; karens: närmast i tid först
-      currentSort.key = 'release_at';
-      currentSort.dir = v === 'released' ? 'desc' : 'asc';
+      // Guldkornsvyer rankas på poäng; standardvyer på datum.
+      currentSort.key = v === 'upcoming' || v === 'free' ? 'score_total' : 'release_at';
+      currentSort.dir = v === 'released' || v === 'upcoming' || v === 'free' ? 'desc' : 'asc';
       // Datumintervall från andra vyn pekar åt fel håll — nollställ
       activePreset = '';
       updateDatePresets();
@@ -1178,7 +1249,7 @@ function wireUi() {
         currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
       } else {
         currentSort.key = k;
-        currentSort.dir = k === 'release_at' ? 'asc' : 'asc';
+        currentSort.dir = k === 'score_total' || k === 'majestic_refsubnets' || k === 'opr_score' ? 'desc' : 'asc';
       }
       refresh();
     });
@@ -1287,7 +1358,7 @@ function setMeta(m: Meta | null) {
   const se = (m.by_tld.se ?? 0).toLocaleString('sv-SE');
   const nu = (m.by_tld.nu ?? 0).toLocaleString('sv-SE');
   const enr = m.enrichments;
-  const extra = enr ? ` · 📖 ${(enr.word_hits ?? 0).toLocaleString('sv-SE')} · ⭐ ${(enr.tranco_hits ?? 0).toLocaleString('sv-SE')} · 🔗 ${(enr.majestic_hits ?? 0).toLocaleString('sv-SE')} · ⏳ ${(enr.wayback_hits ?? 0).toLocaleString('sv-SE')}/${(enr.coverage_wayback ?? 0)}% · 📡 ${(enr.dns_active ?? 0).toLocaleString('sv-SE')}/${(enr.coverage_dns ?? 0)}%` : '';
+  const extra = enr ? ` · 📖 ${(enr.word_hits ?? 0).toLocaleString('sv-SE')} · ⭐ ${(enr.tranco_hits ?? 0).toLocaleString('sv-SE')} · 🔗 ${(enr.majestic_hits ?? 0).toLocaleString('sv-SE')} · ⏳ ${(enr.wayback_hits ?? 0).toLocaleString('sv-SE')}/${(enr.coverage_wayback ?? 0)}% · 📡 ${(enr.dns_active ?? 0).toLocaleString('sv-SE')}/${(enr.coverage_dns ?? 0)}%${(enr.dns_errors ?? 0) > 0 ? ` · ⚠ DNS ${(enr.dns_errors ?? 0).toLocaleString('sv-SE')}` : ''}` : '';
   els.meta.textContent = `${se} .se · ${nu} .nu · uppd. ${updated}${extra}`;
 }
 
@@ -1315,7 +1386,12 @@ async function main() {
 
     const fromUrl = qsToFilters(location.search.replace(/^\?/, ''));
     if (Object.keys(fromUrl).length) writeFilters(fromUrl);
-    if (fromUrl.view === 'released' && !fromUrl.sortDir) currentSort.dir = 'desc';
+    if ((fromUrl.view === 'released' || fromUrl.view === 'upcoming' || fromUrl.view === 'free') && !fromUrl.sortDir) {
+      currentSort.dir = 'desc';
+    }
+    if ((fromUrl.view === 'upcoming' || fromUrl.view === 'free') && !fromUrl.sortKey) {
+      currentSort.key = 'score_total';
+    }
     updateTldPills();
     updateViewPills();
     if (fromUrl.from || fromUrl.to) els.dateCustom.classList.remove('hidden');

@@ -41,7 +41,7 @@ const WAYBACK_REFRESH_DAYS = parseInt(process.env.WAYBACK_REFRESH_DAYS || '30', 
 const DNS_MAX_PER_RUN = parseInt(process.env.DNS_MAX || '8000', 10);
 const DNS_REFRESH_DAYS = parseInt(process.env.DNS_REFRESH_DAYS || '14', 10);
 // Hur många dagar bakåt nysläppta domäner visas med tillgänglighetsstatus
-const RELEASED_DAYS = parseInt(process.env.RELEASED_DAYS || '3', 10);
+const RELEASED_DAYS = parseInt(process.env.RELEASED_DAYS || '90', 10);
 
 const VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö']);
 
@@ -153,6 +153,91 @@ function isCvcv(s) {
   return /^(CV)+$/.test(pat) || /^(VC)+$/.test(pat);
 }
 
+const COMMERCIAL_TERMS = [
+  'advokat', 'bil', 'bostad', 'bygg', 'butik', 'el', 'energi', 'finans',
+  'flytt', 'försäkring', 'hotell', 'jobb', 'jurist', 'kredit', 'lån',
+  'mäklare', 'renovering', 'resa', 'restaurang', 'sol', 'tandläkare', 'vård'
+];
+const RISK_TERMS = [
+  'adult', 'betting', 'casino', 'escort', 'gambling', 'poker', 'porn',
+  'sex', 'slots', 'viagra', 'xxx'
+];
+
+function clampScore(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function logPoints(value, cap, points) {
+  if (!value || value <= 0) return 0;
+  return Math.min(points, Math.log10(value + 1) / Math.log10(cap + 1) * points);
+}
+
+// Fyra transparenta delpoäng byggda enbart från data som redan finns i pipelinen.
+// Efterfrågan är indikativ tills faktisk sökvolym kopplas på i ett senare steg.
+function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, wbCount }) {
+  const asciiOrSwedishLetters = /^[a-zåäö]+$/.test(base);
+  const hasDigit = /\d/.test(base);
+  const hyphens = (base.match(/-/g) || []).length;
+  const repeated = hasRepeatedChar(base);
+  const cvcv = isCvcv(base);
+  const commercial = COMMERCIAL_TERMS.some((term) => base.includes(term));
+  const risky = RISK_TERMS.some((term) => base.includes(term));
+
+  let brand = 0;
+  if (asciiOrSwedishLetters) brand += 18;
+  if (!hasDigit && hyphens === 0) brand += 12;
+  if (base.length >= 4 && base.length <= 10) brand += 35;
+  else if (base.length <= 14) brand += 25;
+  else if (base.length <= 18) brand += 12;
+  else brand += 4;
+  if (word) brand += 25;
+  if (cvcv) brand += 10;
+  if (repeated) brand -= 6;
+  if (base.startsWith('xn--')) brand -= 20;
+
+  let authority = 0;
+  authority += logPoints(maj?.refSubNets, 1000, 35);
+  authority += Math.min(25, Math.max(0, (oprData?.score ?? 0) / 10 * 25));
+  authority += logPoints(wbCount, 1000, 15);
+  authority += logPoints(ccHosts, 1000, 10);
+  if (wbFirst) {
+    const firstYear = parseInt(String(wbFirst).slice(0, 4), 10);
+    if (firstYear > 1990) authority += Math.min(10, (new Date().getUTCFullYear() - firstYear) * 0.7);
+  }
+  if (trancoRank) {
+    authority += Math.max(0, 15 * (1 - Math.log10(Math.max(1, trancoRank)) / 6));
+  }
+
+  let demand = 0;
+  if (word) demand += 35;
+  if (commercial) demand += 30;
+  if (base.length >= 4 && base.length <= 12) demand += 10;
+  if (trancoRank) demand += Math.max(5, 20 * (1 - Math.log10(Math.max(1, trancoRank)) / 6));
+  demand += logPoints(maj?.refSubNets, 100, 10);
+  demand += logPoints(ccHosts, 100, 5);
+
+  let risk = 0;
+  if (base.startsWith('xn--')) risk += 30;
+  if (hasDigit) risk += 15;
+  if (/\d{3,}/.test(base)) risk += 10;
+  if (hyphens) risk += Math.min(20, hyphens * 8);
+  if (/^\d+$/.test(base)) risk += 30;
+  if (risky) risk += 35;
+  if (base.length > 24) risk += 10;
+  if (repeated) risk += 5;
+
+  const scores = {
+    brand: clampScore(brand),
+    authority: clampScore(authority),
+    demand: clampScore(demand),
+    risk: clampScore(risk)
+  };
+  scores.total = clampScore(
+    scores.brand * 0.45 + scores.authority * 0.30 + scores.demand * 0.25 - scores.risk * 0.35
+  );
+  return scores;
+}
+
 // ─── Bygg sqlite ───────────────────────────────────────────────────────────
 function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
   if (existsSync(DB_PATH)) rmSync(DB_PATH);
@@ -186,13 +271,22 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       dns_mx            INTEGER,
       dns_ns            INTEGER,
       dns_checked       INTEGER NOT NULL,
+      dns_status        TEXT,
+      dns_error         TEXT,
       opr_rank          INTEGER,
       opr_score         REAL,
       cc_hosts          INTEGER,
+      score_brand       INTEGER NOT NULL,
+      score_authority   INTEGER NOT NULL,
+      score_demand      INTEGER NOT NULL,
+      score_risk        INTEGER NOT NULL,
+      score_total       INTEGER NOT NULL,
       released          INTEGER NOT NULL DEFAULT 0,
       taken             INTEGER,
       taken_at          TEXT,
-      avail_checked_at  TEXT
+      avail_checked_at  TEXT,
+      availability_status TEXT,
+      availability_error TEXT
     );
   `);
 
@@ -203,16 +297,17 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       is_palindrome, has_repeat, is_cvcv, is_word,
       tranco_rank, majestic_rank, majestic_refsubnets,
       wayback_first, wayback_count, wayback_checked,
-      dns_a, dns_mx, dns_ns, dns_checked,
+      dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error,
       opr_rank, opr_score, cc_hosts,
-      released, taken, taken_at, avail_checked_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      score_brand, score_authority, score_demand, score_risk, score_total,
+      released, taken, taken_at, avail_checked_at, availability_status, availability_error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const stats = {
     word: 0, tranco: 0, majestic: 0, opr: 0, cc: 0,
     waybackChecked: 0, waybackHits: 0,
-    dnsChecked: 0, dnsAny: 0
+    dnsChecked: 0, dnsAny: 0, dnsErrors: 0
   };
 
   const tx = db.transaction((items) => {
@@ -236,6 +331,12 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       const dnsMx = cache?.dns_mx ?? null;
       const dnsNs = cache?.dns_ns ?? null;
       const dnsChecked = cache?.dns_checked_at ? 1 : 0;
+      const dnsStatus = cache?.dns_status ?? null;
+      const dnsError = cache?.dns_error ?? null;
+      const scores = scoreDomain({
+        base, word, trancoRank, maj, oprData, ccHosts,
+        wbFirst, wbCount
+      });
 
       if (word) stats.word++;
       if (trancoRank != null) stats.tranco++;
@@ -250,6 +351,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         stats.dnsChecked++;
         if (dnsA || dnsMx || dnsNs) stats.dnsAny++;
       }
+      if (dnsStatus === 'error') stats.dnsErrors++;
 
       insert.run(
         name, base, tld, r.release_at, base.length,
@@ -265,10 +367,12 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         maj?.rank ?? null,
         maj?.refSubNets ?? null,
         wbFirst, wbCount, wbChecked,
-        dnsA, dnsMx, dnsNs, dnsChecked,
+        dnsA, dnsMx, dnsNs, dnsChecked, dnsStatus, dnsError,
         oprData?.rank ?? null, oprData?.score ?? null,
         ccHosts,
-        r.released ?? 0, r.taken ?? null, r.taken_at ?? null, r.avail_checked_at ?? null
+        scores.brand, scores.authority, scores.demand, scores.risk, scores.total,
+        r.released ?? 0, r.taken ?? null, r.taken_at ?? null, r.avail_checked_at ?? null,
+        r.avail_status ?? null, r.avail_error ?? null
       );
     }
   });
@@ -286,6 +390,8 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
     CREATE INDEX idx_majestic ON domains(majestic_rank);
     CREATE INDEX idx_wayback ON domains(wayback_count);
     CREATE INDEX idx_dns ON domains(dns_a);
+    CREATE INDEX idx_score_total ON domains(score_total);
+    CREATE INDEX idx_available_score ON domains(released, availability_status, score_total);
     CREATE INDEX idx_opr ON domains(opr_rank);
     CREATE INDEX idx_cc ON domains(cc_hosts);
     CREATE INDEX idx_released ON domains(released, release_at);
@@ -330,6 +436,7 @@ function buildMeta(rows, stats, totalCount) {
       wayback_hits: stats.waybackHits,
       dns_checked: stats.dnsChecked,
       dns_active: stats.dnsAny,
+      dns_errors: stats.dnsErrors,
       coverage_wayback: totalCount ? +(stats.waybackChecked / totalCount * 100).toFixed(1) : 0,
       coverage_dns: totalCount ? +(stats.dnsChecked / totalCount * 100).toFixed(1) : 0
     }
@@ -349,10 +456,18 @@ async function main() {
     log(`  ${rows.length.toLocaleString('sv-SE')} domäner från .${src.tld}`);
   }
   const allDomains = all.map((r) => r.name);
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const releasedFrom = new Date(Date.now() - RELEASED_DAYS * 86400000).toISOString().slice(0, 10);
-  // Kvar i karens = release-datumet har inte passerat ännu
-  const future = all.filter((r) => r.release_at > todayStr);
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  // Frisläppningen startar tidigast 04.00 UTC. Före dess räknas dagens
+  // domäner fortfarande som kommande så att "Nästa 24 h" inte tappar dem.
+  const releasedThrough = now.getUTCHours() >= 4
+    ? todayStr
+    : new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+  const releasedFrom = new Date(
+    new Date(`${releasedThrough}T00:00:00Z`).getTime() - Math.max(0, RELEASED_DAYS - 1) * 86400000
+  ).toISOString().slice(0, 10);
+  // Kvar i karens = releasefönstret har inte börjat ännu.
+  const future = all.filter((r) => r.release_at > releasedThrough);
 
   // 2. Snabba berikningar parallellt
   const [words, tranco, majestic, opr, cc] = await Promise.all([
@@ -379,15 +494,20 @@ async function main() {
   // Nysläppta: anteckna dagens karensdata, kolla om frisläppta domäner tagits
   cache.recordKarens(all);
   cache.pruneKarens(releasedFrom);
-  let released = cache.getReleased(releasedFrom, todayStr);
-  log(`  Nysläppta: ${released.length.toLocaleString('sv-SE')} domäner i fönstret ${releasedFrom} → ${todayStr}`);
+  let released = cache.getReleased(releasedFrom, releasedThrough);
+  log(`  Nysläppta: ${released.length.toLocaleString('sv-SE')} domäner i fönstret ${releasedFrom} → ${releasedThrough}`);
   if (process.env.SKIP_AVAIL !== '1' && released.length) {
     await checkAvailability(released, cache, { log });
-    released = cache.getReleased(releasedFrom, todayStr);
+    released = cache.getReleased(releasedFrom, releasedThrough);
   } else if (process.env.SKIP_AVAIL === '1') { warn('SKIP_AVAIL=1'); }
   const releasedRows = released.map((r) => ({
     name: r.domain, tld: r.tld, release_at: r.release_at,
-    released: 1, taken: r.taken, taken_at: r.taken_at, avail_checked_at: r.avail_checked_at
+    released: 1,
+    taken: r.taken,
+    taken_at: r.taken_at,
+    avail_checked_at: r.avail_checked_at,
+    avail_status: r.avail_status,
+    avail_error: r.avail_error
   }));
   const releasedNames = releasedRows.map((r) => r.name);
 
@@ -422,13 +542,14 @@ async function main() {
   log(`  Wayback: ${stats.waybackChecked} kollade, ${stats.waybackHits} med snapshots`);
   log(`  DNS: ${stats.dnsChecked} kollade, ${stats.dnsAny} med aktiva records`);
 
-  const meta = buildMeta(future, stats, all.length);
+  const meta = buildMeta(future, stats, dbRows.length);
   meta.released = {
     window_days: RELEASED_DAYS,
     total: releasedRows.length,
     taken: releasedRows.filter((r) => r.taken === 1).length,
-    free: releasedRows.filter((r) => r.taken === 0).length,
-    unchecked: releasedRows.filter((r) => r.taken == null).length
+    free: releasedRows.filter((r) => r.avail_status === 'free').length,
+    errors: releasedRows.filter((r) => r.avail_status === 'error').length,
+    unchecked: releasedRows.filter((r) => r.avail_status == null).length
   };
   writeFileSync(META_PATH, JSON.stringify(meta, null, 2), 'utf8');
 

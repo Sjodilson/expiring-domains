@@ -21,7 +21,10 @@ export class EnrichmentCache {
           dns_a               INTEGER,
           dns_mx              INTEGER,
           dns_ns              INTEGER,
-          dns_checked_at      TEXT
+          dns_checked_at      TEXT,
+          dns_attempted_at    TEXT,
+          dns_status          TEXT,
+          dns_error           TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_wayback_check ON enrichment(wayback_checked_at);
         CREATE INDEX IF NOT EXISTS idx_dns_check ON enrichment(dns_checked_at);
@@ -37,10 +40,16 @@ export class EnrichmentCache {
           dns_a               INTEGER,
           dns_mx              INTEGER,
           dns_ns              INTEGER,
-          dns_checked_at      TEXT
+          dns_checked_at      TEXT,
+          dns_attempted_at    TEXT,
+          dns_status          TEXT,
+          dns_error           TEXT
         );
       `);
     }
+    this.ensureColumn('enrichment', 'dns_attempted_at', 'TEXT');
+    this.ensureColumn('enrichment', 'dns_status', 'TEXT');
+    this.ensureColumn('enrichment', 'dns_error', 'TEXT');
     // Historik över domäner vi sett i karens — låter oss visa nysläppta
     // domäner även efter att de försvunnit ur källfilen
     this.db.exec(`
@@ -50,10 +59,16 @@ export class EnrichmentCache {
         release_at       TEXT NOT NULL,
         taken            INTEGER,
         taken_at         TEXT,
-        avail_checked_at TEXT
+        avail_checked_at TEXT,
+        avail_attempted_at TEXT,
+        avail_status     TEXT,
+        avail_error      TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_karens_release ON karens(release_at);
     `);
+    this.ensureColumn('karens', 'avail_attempted_at', 'TEXT');
+    this.ensureColumn('karens', 'avail_status', 'TEXT');
+    this.ensureColumn('karens', 'avail_error', 'TEXT');
     this.upsertKarensStmt = this.db.prepare(`
       INSERT INTO karens (domain, tld, release_at) VALUES (?, ?, ?)
       ON CONFLICT(domain) DO UPDATE SET tld = excluded.tld, release_at = excluded.release_at
@@ -62,7 +77,17 @@ export class EnrichmentCache {
       UPDATE karens SET
         taken = ?,
         taken_at = CASE WHEN ? = 1 AND taken_at IS NULL THEN ? ELSE taken_at END,
-        avail_checked_at = ?
+        avail_checked_at = ?,
+        avail_attempted_at = ?,
+        avail_status = ?,
+        avail_error = NULL
+      WHERE domain = ?
+    `);
+    this.setAvailErrorStmt = this.db.prepare(`
+      UPDATE karens SET
+        avail_attempted_at = ?,
+        avail_status = 'error',
+        avail_error = ?
       WHERE domain = ?
     `);
 
@@ -76,14 +101,32 @@ export class EnrichmentCache {
         wayback_checked_at = excluded.wayback_checked_at
     `);
     this.upsertDns = this.db.prepare(`
-      INSERT INTO enrichment (domain, dns_a, dns_mx, dns_ns, dns_checked_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO enrichment (
+        domain, dns_a, dns_mx, dns_ns,
+        dns_checked_at, dns_attempted_at, dns_status, dns_error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(domain) DO UPDATE SET
         dns_a = excluded.dns_a,
         dns_mx = excluded.dns_mx,
         dns_ns = excluded.dns_ns,
-        dns_checked_at = excluded.dns_checked_at
+        dns_checked_at = excluded.dns_checked_at,
+        dns_attempted_at = excluded.dns_attempted_at,
+        dns_status = excluded.dns_status,
+        dns_error = excluded.dns_error
     `);
+    this.upsertDnsError = this.db.prepare(`
+      INSERT INTO enrichment (domain, dns_attempted_at, dns_status, dns_error)
+      VALUES (?, ?, 'error', ?)
+      ON CONFLICT(domain) DO UPDATE SET
+        dns_attempted_at = excluded.dns_attempted_at,
+        dns_status = 'error',
+        dns_error = excluded.dns_error
+    `);
+  }
+
+  ensureColumn(table, column, definition) {
+    const columns = new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name));
+    if (!columns.has(column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
   get(domain) {
@@ -94,23 +137,38 @@ export class EnrichmentCache {
     this.upsertWayback.run(domain, first, count, new Date().toISOString());
   }
 
-  setDns(domain, a, mx, ns) {
-    this.upsertDns.run(domain, a ? 1 : 0, mx ? 1 : 0, ns ? 1 : 0, new Date().toISOString());
+  setDns(domain, a, mx, ns, status = 'ok', error = null) {
+    const now = new Date().toISOString();
+    const value = (v) => v == null ? null : (v ? 1 : 0);
+    this.upsertDns.run(domain, value(a), value(mx), value(ns), now, now, status, error);
+  }
+
+  setDnsError(domain, error) {
+    this.upsertDnsError.run(domain, new Date().toISOString(), error);
   }
 
   // Returnerar domäner som behöver uppdateras (aldrig kollat eller äldre än maxAgeDays)
   needsUpdate(field, allDomains, maxAgeDays) {
     const cutoff = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
     const ck = field === 'wayback' ? 'wayback_checked_at' : 'dns_checked_at';
+    const dnsRetryCutoff = new Date(Date.now() - 6 * 3600000).toISOString();
     // Bygg en map av kända checked_at
-    const stmt = this.db.prepare(`SELECT domain, ${ck} AS checked FROM enrichment`);
+    const extra = field === 'dns' ? ', dns_attempted_at AS attempted, dns_status AS status' : '';
+    const stmt = this.db.prepare(`SELECT domain, ${ck} AS checked${extra} FROM enrichment`);
     const known = new Map();
-    for (const row of stmt.iterate()) known.set(row.domain, row.checked);
+    for (const row of stmt.iterate()) known.set(row.domain, row);
 
     const out = [];
     for (const d of allDomains) {
-      const checked = known.get(d);
-      if (!checked || checked < cutoff) out.push(d);
+      const row = known.get(d);
+      if (field === 'dns' && row?.status === 'error') {
+        if (!row.attempted || row.attempted < dnsRetryCutoff) out.push(d);
+      } else if (field === 'dns' && row?.status == null) {
+        // Äldre cache saknar felstatus och kan innehålla timeouts sparade som falska nollor.
+        out.push(d);
+      } else if (!row?.checked || row.checked < cutoff) {
+        out.push(d);
+      }
     }
     return out;
   }
@@ -137,13 +195,32 @@ export class EnrichmentCache {
   // Domäner vars release-datum passerat, nyaste först
   getReleased(fromDate, toDate) {
     return this.db
-      .prepare('SELECT * FROM karens WHERE release_at >= ? AND release_at <= ? ORDER BY release_at DESC, domain ASC')
+      .prepare(`
+        SELECT k.*, e.dns_a, e.dns_mx, e.dns_ns,
+          e.dns_attempted_at, e.dns_status, e.dns_error
+        FROM karens k
+        LEFT JOIN enrichment e ON e.domain = k.domain
+        WHERE k.release_at >= ? AND k.release_at <= ?
+        ORDER BY k.release_at DESC, k.domain ASC
+      `)
       .all(fromDate, toDate);
   }
 
   setAvailability(domain, taken) {
     const now = new Date().toISOString();
-    this.setAvailStmt.run(taken ? 1 : 0, taken ? 1 : 0, now, now, domain);
+    this.setAvailStmt.run(
+      taken ? 1 : 0,
+      taken ? 1 : 0,
+      now,
+      now,
+      now,
+      taken ? 'occupied' : 'free',
+      domain
+    );
+  }
+
+  setAvailabilityError(domain, error) {
+    this.setAvailErrorStmt.run(new Date().toISOString(), error, domain);
   }
 
   // Släng released-rader äldre än fönstret

@@ -55,10 +55,12 @@
               </label>
             </div>
 
-            <!-- Vy: i karens / nysläppta -->
+            <!-- Vy: standardlistor + guldkorn -->
             <div role="radiogroup" aria-label="Vy" class="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
               <button type="button" data-view="karens" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner i karens som frisläpps framöver">I karens</button>
-              <button type="button" data-view="released" class="view-pill px-3 py-1.5" title="Domäner som frisläppts de senaste dygnen — med status om de tagits">🆕 Nysläppta</button>
+              <button type="button" data-view="released" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner som frisläppts de senaste 90 dagarna">🆕 Nysläppta</button>
+              <button type="button" data-view="upcoming" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade domäner som frisläpps inom nästa dygn">💎 Nästa 24 h</button>
+              <button type="button" data-view="free" class="view-pill px-3 py-1.5" title="Högst rankade domäner som bekräftats lediga">✨ Lediga nu</button>
             </div>
 
             <!-- TLD-pills -->
@@ -171,7 +173,7 @@
               <div></div>
               <div></div>
               <button type="button" data-sort="name" class="th-sort text-left">Domän <span class="sort-ind"></span></button>
-              <div class="text-right" title="Visar även BL (backlinks) och DA (OPR)">Signaler / BL / DA</div>
+              <button type="button" data-sort="score_total" class="th-sort justify-end" title="Guldkornspoäng samt varumärke, SEO, efterfrågan och risk">Poäng / signaler <span class="sort-ind"></span></button>
               <button type="button" data-sort="length" class="th-sort text-left">Len <span class="sort-ind"></span></button>
               <button type="button" data-sort="release_at" class="th-sort text-left">Frisläpps <span class="sort-ind"></span></button>
               <div></div>
@@ -226,7 +228,7 @@
 
       <!-- Hjälp-modal -->
       <div id="help-modal" class="hidden fixed inset-0 bg-black/30 z-40 flex items-center justify-center p-4">
-        <div class="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-md w-full p-5 space-y-3 text-sm">
+        <div class="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-auto p-5 space-y-3 text-sm">
           <div class="flex items-center justify-between">
             <h2 class="text-lg font-bold">Hjälp</h2>
             <button id="help-close" class="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">✕</button>
@@ -259,7 +261,17 @@
               <li>🔗 Backlinks (Majestic)</li>
               <li>⏳ Wayback-snapshots</li>
               <li>📡 Aktiva DNS-records</li>
+              <li>💎 Total · V varumärke · S SEO · E efterfrågan · R risk</li>
               <li>↔ Palindrom · 🗣 Uttalbart</li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="font-semibold mb-1">Guldkornsvyer</h3>
+            <ul class="space-y-1 text-xs">
+              <li><strong>Nästa 24 h</strong> rankar kommande frisläppningar efter totalpoäng.</li>
+              <li><strong>Lediga nu</strong> visar endast domäner som Internetstiftelsens DAS bekräftat som lediga.</li>
+              <li>Efterfrågan är en indikativ poäng från ord-, popularitets- och länksignaler.</li>
+              <li>Risk är teknisk/namnbaserad och ersätter inte en varumärkeskontroll.</li>
             </ul>
           </div>
         </div>

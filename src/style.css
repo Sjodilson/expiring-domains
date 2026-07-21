@@ -247,9 +247,35 @@ body {
 .dark .sig.wayback { background: rgb(22 78 99 / 0.5); color: rgb(207 250 254); }
 .sig.dns { background: rgb(254 226 226); color: rgb(153 27 27); }
 .dark .sig.dns { background: rgb(127 29 29 / 0.5); color: rgb(254 226 226); }
+.sig.dns-error { background: rgb(254 243 199); color: rgb(146 64 14); font-weight: 700; }
+.dark .sig.dns-error { background: rgb(120 53 15 / 0.5); color: rgb(253 230 138); }
+
+/* Transparenta guldkornspoäng */
+.score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.score.total { background: rgb(237 233 254); color: rgb(91 33 182); min-width: 44px; }
+.score.brand { background: rgb(219 234 254); color: rgb(30 64 175); }
+.score.authority { background: rgb(243 232 255); color: rgb(107 33 168); }
+.score.demand { background: rgb(220 252 231); color: rgb(22 101 52); }
+.score.risk { background: rgb(254 242 242); color: rgb(153 27 27); }
+.dark .score.total { background: rgb(76 29 149 / 0.55); color: rgb(221 214 254); }
+.dark .score.brand { background: rgb(30 58 138 / 0.55); color: rgb(191 219 254); }
+.dark .score.authority { background: rgb(88 28 135 / 0.55); color: rgb(233 213 255); }
+.dark .score.demand { background: rgb(20 83 45 / 0.55); color: rgb(187 247 208); }
+.dark .score.risk { background: rgb(127 29 29 / 0.5); color: rgb(254 202 202); }
 
 /* Status för nysläppta domäner */
-.sig.rel-free, .sig.rel-taken, .sig.rel-unknown {
+.sig.rel-free, .sig.rel-taken, .sig.rel-unknown, .sig.rel-error {
   width: auto; /* .sig har fast 18px för emoji-chips — textchips behöver naturlig bredd */
   font-size: 0.7rem;
   font-weight: 600;
@@ -264,6 +290,8 @@ body {
 .dark .sig.rel-taken { background: rgb(127 29 29 / 0.6); color: rgb(254 202 202); }
 .sig.rel-unknown { background: rgb(241 245 249); color: rgb(100 116 139); }
 .dark .sig.rel-unknown { background: rgb(30 41 59); color: rgb(148 163 184); }
+.sig.rel-error { background: rgb(254 243 199); color: rgb(146 64 14); }
+.dark .sig.rel-error { background: rgb(120 53 15 / 0.6); color: rgb(253 230 138); }
 
 #rows .row .len,
 #rows .row .date {
@@ -492,6 +520,44 @@ body {
 }
 .signal-detail.dim {
   opacity: 0.5;
+}
+
+.gem-total {
+  color: rgb(109 40 217);
+  font-variant-numeric: tabular-nums;
+}
+.dark .gem-total { color: rgb(196 181 253); }
+.score-detail {
+  padding: 7px 8px;
+  margin-bottom: 5px;
+  border-radius: 6px;
+  background: rgb(248 250 252);
+}
+.dark .score-detail { background: rgb(30 41 59); }
+.score-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+.score-head strong { font-variant-numeric: tabular-nums; }
+.score-track {
+  height: 5px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(226 232 240);
+}
+.dark .score-track { background: rgb(51 65 85); }
+.score-track span { display: block; height: 100%; border-radius: inherit; }
+.score-detail.brand .score-track span { background: rgb(59 130 246); }
+.score-detail.authority .score-track span { background: rgb(147 51 234); }
+.score-detail.demand .score-track span { background: rgb(34 197 94); }
+.score-detail.risk .score-track span { background: rgb(239 68 68); }
+
+@media (max-width: 900px) {
+  #rows .score:not(.total) { display: none; }
 }
 
 .similar-list {

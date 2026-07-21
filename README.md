@@ -11,8 +11,9 @@ webbläsaren via en SQLite-databas (sql.js) — inga uppgifter skickas vidare.
 - Sortera på datum, namn eller längd
 - Virtuell scroll — hanterar hundratusentals rader smidigt
 - Direktlänk till Internetstiftelsens uppslag per domän
-- Nysläppta-vy: domäner frisläppta senaste dygnen med status om de
-  registrerats igen (DNS-koll) eller sannolikt är lediga
+- Nysläppta-vy: 90 dagars historik med registerstatus från Internetstiftelsens DAS
+- Guldkornspoäng för varumärke, SEO/historik, indikativ efterfrågan och risk
+- Topplistor för bästa domäner nästa 24 timmar och bästa bekräftat lediga nu
 - Uppdateras varje timme via GitHub Actions (full berikning kl 05 UTC)
 
 ## Kör lokalt
@@ -34,9 +35,11 @@ npm run preview
 
 Workflowen i [.github/workflows/deploy.yml](.github/workflows/deploy.yml) bygger
 och deployar till GitHub Pages varje timme samt vid push till `main`. De
-timvisa körningarna uppdaterar nysläppta domäner och deras
-tillgänglighetsstatus med en lätt berikningsbudget; den fulla berikningen
-(Wayback + stor DNS-batch) körs i 05-körningen (UTC).
+timvisa körningarna uppdaterar nysläppta domäner och deras registerstatus via
+Internetstiftelsens Free/DAS. Upptagna domäners A-, MX- och NS-records sparas
+separat. DNS-timeout och SERVFAIL markeras som kontrollfel och cachas aldrig
+som "inga records". Den fulla berikningen (Wayback + stor DNS-batch) körs i
+05-körningen (UTC).
 
 Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 

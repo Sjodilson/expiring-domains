@@ -5,6 +5,7 @@ import { runPool } from './util.mjs';
 
 const CONCURRENCY = 40;
 const TIMEOUT_MS = 5_000;
+const DAS_REQUESTS_PER_SECOND = 25;
 
 dns.setServers(['1.1.1.1', '8.8.8.8', '9.9.9.9']);
 
@@ -21,36 +22,132 @@ async function withTimeout(promise, ms) {
 async function tryResolve(fn, domain) {
   try {
     const r = await withTimeout(fn(domain), TIMEOUT_MS);
-    return Array.isArray(r) ? r.length > 0 : !!r;
-  } catch {
-    return false;
+    return { value: Array.isArray(r) ? r.length > 0 : !!r, error: null };
+  } catch (err) {
+    const code = err?.code || (err?.message === 'timeout' ? 'ETIMEOUT' : 'EUNKNOWN');
+    // ENODATA/ENOTFOUND är riktiga negativa DNS-svar. Övriga fel är tillfälliga
+    // eller tekniska och får aldrig lagras som "inga records".
+    if (code === 'ENODATA' || code === 'ENOTFOUND') return { value: false, error: null };
+    return { value: null, error: code };
   }
 }
 
 async function lookupOne(domain) {
-  const [a, mx, ns] = await Promise.all([
+  const [aResult, mxResult, nsResult] = await Promise.all([
     tryResolve(dns.resolve4, domain),
     tryResolve(dns.resolveMx, domain),
     tryResolve(dns.resolveNs, domain)
   ]);
-  return { a, mx, ns };
+  const errors = [aResult.error, mxResult.error, nsResult.error].filter(Boolean);
+  const active = aResult.value === true || mxResult.value === true || nsResult.value === true;
+  return {
+    a: aResult.value,
+    mx: mxResult.value,
+    ns: nsResult.value,
+    active,
+    status: errors.length ? (active ? 'partial' : 'error') : 'ok',
+    error: errors.length ? [...new Set(errors)].join(', ') : null
+  };
 }
 
-// Kollar om nysläppta domäner registrerats igen (aktiva DNS-records = tagen).
-// Redan tagna domäner kollas inte om.
+async function checkDas(domain) {
+  const host = domain.endsWith('.nu') ? 'free.iis.nu' : 'free.iis.se';
+  try {
+    const res = await fetch(`http://${host}/free?q=${encodeURIComponent(domain)}`, {
+      headers: { 'User-Agent': 'expiring-domains-builder/2.0' },
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    if (!res.ok) throw new Error(`HTTP_${res.status}`);
+    const body = (await res.text()).trim().toLowerCase();
+    if (body.startsWith('occupied ')) return { taken: true, error: null };
+    if (body.startsWith('free ')) return { taken: false, error: null };
+    return { taken: null, error: `OVÄNTAT_SVAR: ${body.slice(0, 80)}` };
+  } catch (err) {
+    return { taken: null, error: err?.name === 'TimeoutError' ? 'ETIMEOUT' : (err?.message || 'EUNKNOWN') };
+  }
+}
+
+function hoursSince(iso) {
+  if (!iso) return Infinity;
+  const ms = Date.now() - new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms / 3600000 : Infinity;
+}
+
+function availabilityDue(row, today) {
+  if (row.taken === 1) return false;
+  if (row.avail_status == null) return true;
+  const ageDays = Math.max(0, Math.floor((today.getTime() - new Date(`${row.release_at}T00:00:00Z`).getTime()) / 86400000));
+  const sinceAttempt = hoursSince(row.avail_attempted_at || row.avail_checked_at);
+  if (row.avail_status === 'error') return sinceAttempt >= 6;
+  if (ageDays === 0) return sinceAttempt >= 0.75;
+  if (ageDays <= 7) return sinceAttempt >= 23;
+  return sinceAttempt >= 24 * 7;
+}
+
+async function runDasBatches(items, worker, onProgress) {
+  let done = 0;
+  for (let i = 0; i < items.length; i += DAS_REQUESTS_PER_SECOND) {
+    const batch = items.slice(i, i + DAS_REQUESTS_PER_SECOND);
+    await Promise.all(batch.map(worker));
+    done += batch.length;
+    onProgress?.(done, items.length);
+    if (done < items.length) await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+}
+
+// Registerstatus hämtas från Internetstiftelsens Free/DAS. När en domän är
+// upptagen sparas även dess faktiska DNS-resultat. Tekniska fel blir "okänd".
 export async function checkAvailability(released, cache, { log }) {
-  const todo = released.filter((r) => r.taken !== 1).map((r) => r.domain);
-  if (todo.length === 0) return { checked: 0, taken: 0 };
-  log(`  Tillgänglighet: kollar ${todo.length.toLocaleString('sv-SE')} nysläppta domäner`);
+  const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const todo = released.filter((r) => availabilityDue(r, today));
+  const dnsRepair = released.filter((r) =>
+    r.taken === 1 &&
+    !(r.dns_a || r.dns_mx || r.dns_ns) &&
+    (r.dns_status == null || (r.dns_status === 'error' && hoursSince(r.dns_attempted_at) >= 6))
+  );
+
   let taken = 0;
-  await runPool(todo, CONCURRENCY, async (domain) => {
-    const r = await lookupOne(domain);
-    const isTaken = r.a || r.mx || r.ns;
-    if (isTaken) taken++;
-    cache.setAvailability(domain, isTaken);
-  });
-  log(`  Tillgänglighet: ${taken} nyregistrerade av ${todo.length} kollade`);
-  return { checked: todo.length, taken };
+  let free = 0;
+  let errors = 0;
+  if (todo.length) {
+    log(`  Tillgänglighet (DAS): kollar ${todo.length.toLocaleString('sv-SE')} nysläppta domäner`);
+    await runDasBatches(
+      todo,
+      async (row) => {
+        const result = await checkDas(row.domain);
+        if (result.error) {
+          errors++;
+          cache.setAvailabilityError(row.domain, result.error);
+          return;
+        }
+        cache.setAvailability(row.domain, result.taken);
+        if (result.taken) {
+          taken++;
+          const dnsResult = await lookupOne(row.domain);
+          if (dnsResult.status === 'error') cache.setDnsError(row.domain, dnsResult.error);
+          else cache.setDns(row.domain, dnsResult.a, dnsResult.mx, dnsResult.ns, dnsResult.status, dnsResult.error);
+        } else {
+          free++;
+        }
+      },
+      (done, total) => {
+        if (done % 250 === 0 || done === total) log(`    DAS: ${done}/${total}`);
+      }
+    );
+    log(`  Tillgänglighet: ${taken} upptagna, ${free} lediga, ${errors} kontrollfel`);
+  }
+
+  if (dnsRepair.length) {
+    log(`  DNS-reparation: kollar ${dnsRepair.length.toLocaleString('sv-SE')} redan upptagna domäner`);
+    await runPool(dnsRepair, CONCURRENCY, async (row) => {
+      cache.setAvailability(row.domain, true);
+      const result = await lookupOne(row.domain);
+      if (result.status === 'error') cache.setDnsError(row.domain, result.error);
+      else cache.setDns(row.domain, result.a, result.mx, result.ns, result.status, result.error);
+    });
+  }
+
+  return { checked: todo.length, taken, free, errors, dnsRepaired: dnsRepair.length };
 }
 
 export async function enrichDns(domains, cache, { maxPerRun, log }) {
@@ -64,10 +161,11 @@ export async function enrichDns(domains, cache, { maxPerRun, log }) {
     CONCURRENCY,
     async (domain) => {
       const r = await lookupOne(domain);
-      cache.setDns(domain, r.a, r.mx, r.ns);
-      if (r.a) counts.a++;
-      if (r.mx) counts.mx++;
-      if (r.ns) counts.ns++;
+      if (r.status === 'error') cache.setDnsError(domain, r.error);
+      else cache.setDns(domain, r.a, r.mx, r.ns, r.status, r.error);
+      if (r.a === true) counts.a++;
+      if (r.mx === true) counts.mx++;
+      if (r.ns === true) counts.ns++;
     },
     (done, total) => {
       if (done % 1000 === 0 || done === total) {
