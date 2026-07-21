@@ -77,7 +77,8 @@ interface Row {
 }
 
 type View = 'karens' | 'released' | 'upcoming' | 'free';
-type SortKey = 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score' | 'score_total';
+type SortKey = 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score' |
+  'score_total' | 'score_brand' | 'score_authority' | 'score_demand' | 'score_risk';
 
 interface Filters {
   q: string;
@@ -106,6 +107,16 @@ interface Filters {
   notes: boolean;
   minLen: number | null;
   maxLen: number | null;
+  minScoreTotal: number | null;
+  maxScoreTotal: number | null;
+  minScoreBrand: number | null;
+  maxScoreBrand: number | null;
+  minScoreAuthority: number | null;
+  maxScoreAuthority: number | null;
+  minScoreDemand: number | null;
+  maxScoreDemand: number | null;
+  minScoreRisk: number | null;
+  maxScoreRisk: number | null;
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -114,7 +125,12 @@ const DEFAULT_FILTERS: Filters = {
   noDigit: false, noHyphen: false, onlyDigits: false, onlyLetters: false,
   palindrome: false, repeat: false, cvcv: false,
   word: false, tranco: false, majestic: false, opr: false, cc: false, wayback: false, dns: false,
-  watch: false, notes: false, minLen: null, maxLen: null
+  watch: false, notes: false, minLen: null, maxLen: null,
+  minScoreTotal: null, maxScoreTotal: null,
+  minScoreBrand: null, maxScoreBrand: null,
+  minScoreAuthority: null, maxScoreAuthority: null,
+  minScoreDemand: null, maxScoreDemand: null,
+  minScoreRisk: null, maxScoreRisk: null
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -150,6 +166,16 @@ const els = {
   fNotes: $<HTMLInputElement>('f-notes'),
   fMinLen: $<HTMLInputElement>('f-minlen'),
   fMaxLen: $<HTMLInputElement>('f-maxlen'),
+  fScoreTotalMin: $<HTMLInputElement>('f-score-total-min'),
+  fScoreTotalMax: $<HTMLInputElement>('f-score-total-max'),
+  fScoreBrandMin: $<HTMLInputElement>('f-score-brand-min'),
+  fScoreBrandMax: $<HTMLInputElement>('f-score-brand-max'),
+  fScoreAuthorityMin: $<HTMLInputElement>('f-score-authority-min'),
+  fScoreAuthorityMax: $<HTMLInputElement>('f-score-authority-max'),
+  fScoreDemandMin: $<HTMLInputElement>('f-score-demand-min'),
+  fScoreDemandMax: $<HTMLInputElement>('f-score-demand-max'),
+  fScoreRiskMin: $<HTMLInputElement>('f-score-risk-min'),
+  fScoreRiskMax: $<HTMLInputElement>('f-score-risk-max'),
   reset: $<HTMLButtonElement>('reset'),
   viewport: $('viewport'),
   spacer: $('spacer'),
@@ -290,7 +316,17 @@ function readFilters(): Filters {
     watch: els.fWatch.checked,
     notes: els.fNotes.checked,
     minLen: els.fMinLen.value ? parseInt(els.fMinLen.value, 10) : null,
-    maxLen: els.fMaxLen.value ? parseInt(els.fMaxLen.value, 10) : null
+    maxLen: els.fMaxLen.value ? parseInt(els.fMaxLen.value, 10) : null,
+    minScoreTotal: els.fScoreTotalMin.value ? parseInt(els.fScoreTotalMin.value, 10) : null,
+    maxScoreTotal: els.fScoreTotalMax.value ? parseInt(els.fScoreTotalMax.value, 10) : null,
+    minScoreBrand: els.fScoreBrandMin.value ? parseInt(els.fScoreBrandMin.value, 10) : null,
+    maxScoreBrand: els.fScoreBrandMax.value ? parseInt(els.fScoreBrandMax.value, 10) : null,
+    minScoreAuthority: els.fScoreAuthorityMin.value ? parseInt(els.fScoreAuthorityMin.value, 10) : null,
+    maxScoreAuthority: els.fScoreAuthorityMax.value ? parseInt(els.fScoreAuthorityMax.value, 10) : null,
+    minScoreDemand: els.fScoreDemandMin.value ? parseInt(els.fScoreDemandMin.value, 10) : null,
+    maxScoreDemand: els.fScoreDemandMax.value ? parseInt(els.fScoreDemandMax.value, 10) : null,
+    minScoreRisk: els.fScoreRiskMin.value ? parseInt(els.fScoreRiskMin.value, 10) : null,
+    maxScoreRisk: els.fScoreRiskMax.value ? parseInt(els.fScoreRiskMax.value, 10) : null
   };
 }
 
@@ -321,6 +357,16 @@ function writeFilters(f: Partial<Filters>) {
   if (f.notes !== undefined) els.fNotes.checked = f.notes;
   if (f.minLen !== undefined) els.fMinLen.value = f.minLen == null ? '' : String(f.minLen);
   if (f.maxLen !== undefined) els.fMaxLen.value = f.maxLen == null ? '' : String(f.maxLen);
+  if (f.minScoreTotal !== undefined) els.fScoreTotalMin.value = f.minScoreTotal == null ? '' : String(f.minScoreTotal);
+  if (f.maxScoreTotal !== undefined) els.fScoreTotalMax.value = f.maxScoreTotal == null ? '' : String(f.maxScoreTotal);
+  if (f.minScoreBrand !== undefined) els.fScoreBrandMin.value = f.minScoreBrand == null ? '' : String(f.minScoreBrand);
+  if (f.maxScoreBrand !== undefined) els.fScoreBrandMax.value = f.maxScoreBrand == null ? '' : String(f.maxScoreBrand);
+  if (f.minScoreAuthority !== undefined) els.fScoreAuthorityMin.value = f.minScoreAuthority == null ? '' : String(f.minScoreAuthority);
+  if (f.maxScoreAuthority !== undefined) els.fScoreAuthorityMax.value = f.maxScoreAuthority == null ? '' : String(f.maxScoreAuthority);
+  if (f.minScoreDemand !== undefined) els.fScoreDemandMin.value = f.minScoreDemand == null ? '' : String(f.minScoreDemand);
+  if (f.maxScoreDemand !== undefined) els.fScoreDemandMax.value = f.maxScoreDemand == null ? '' : String(f.maxScoreDemand);
+  if (f.minScoreRisk !== undefined) els.fScoreRiskMin.value = f.minScoreRisk == null ? '' : String(f.minScoreRisk);
+  if (f.maxScoreRisk !== undefined) els.fScoreRiskMax.value = f.maxScoreRisk == null ? '' : String(f.maxScoreRisk);
 }
 
 const currentSort = { key: 'release_at' as Filters['sortKey'], dir: 'asc' as Filters['sortDir'] };
@@ -338,6 +384,10 @@ function buildOrderBy(f: Filters): string {
     return `CASE WHEN opr_score IS NULL THEN 1 ELSE 0 END, opr_score ${dir}, name ASC`;
   }
   if (f.sortKey === 'score_total') return `score_total ${dir}, score_authority DESC, name ASC`;
+  if (f.sortKey === 'score_brand') return `score_brand ${dir}, score_total DESC, name ASC`;
+  if (f.sortKey === 'score_authority') return `score_authority ${dir}, score_total DESC, name ASC`;
+  if (f.sortKey === 'score_demand') return `score_demand ${dir}, score_total DESC, name ASC`;
+  if (f.sortKey === 'score_risk') return `score_risk ${dir}, score_total DESC, name ASC`;
   return `release_at ${dir}, name ASC`;
 }
 
@@ -350,7 +400,10 @@ const SHORT_KEY: Record<string, string> = {
   noDigit: 'nd', noHyphen: 'nh', onlyDigits: 'od', onlyLetters: 'ol',
   palindrome: 'pa', repeat: 'rp', cvcv: 'cv',
   word: 'w', tranco: 'tr', majestic: 'mj', opr: 'op', cc: 'cc', wayback: 'wb', dns: 'dn',
-  watch: 'wl', notes: 'nt', minLen: 'mn', maxLen: 'mx'
+  watch: 'wl', notes: 'nt', minLen: 'mn', maxLen: 'mx',
+  minScoreTotal: 'stn', maxScoreTotal: 'stx', minScoreBrand: 'sbn', maxScoreBrand: 'sbx',
+  minScoreAuthority: 'san', maxScoreAuthority: 'sax', minScoreDemand: 'sdn', maxScoreDemand: 'sdx',
+  minScoreRisk: 'srn', maxScoreRisk: 'srx'
 };
 const LONG_KEY: Record<string, keyof Filters> = Object.fromEntries(
   Object.entries(SHORT_KEY).map(([k, v]) => [v, k as keyof Filters])
@@ -371,6 +424,9 @@ function filtersToQs(f: Filters): string {
   }
   if (f.minLen != null) p.set(SHORT_KEY.minLen, String(f.minLen));
   if (f.maxLen != null) p.set(SHORT_KEY.maxLen, String(f.maxLen));
+  for (const k of ['minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk'] as const) {
+    if (f[k] != null) p.set(SHORT_KEY[k], String(f[k]));
+  }
   return p.toString();
 }
 
@@ -380,7 +436,7 @@ function qsToFilters(qs: string): Partial<Filters> {
   for (const [short, val] of p.entries()) {
     const long = LONG_KEY[short];
     if (!long) continue;
-    if (long === 'minLen' || long === 'maxLen') {
+    if (['minLen','maxLen','minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk'].includes(long)) {
       const n = parseInt(val, 10);
       f[long] = isNaN(n) ? null : n;
     } else if (long === 'q' || long === 'tld' || long === 'from' || long === 'to') {
@@ -388,7 +444,7 @@ function qsToFilters(qs: string): Partial<Filters> {
     } else if (long === 'view') {
       f[long] = val === 'released' || val === 'upcoming' || val === 'free' ? val : 'karens';
     } else if (long === 'sortKey') {
-      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total'].includes(val) ? val : 'release_at';
+      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total', 'score_brand', 'score_authority', 'score_demand', 'score_risk'].includes(val) ? val : 'release_at';
     } else if (long === 'sortDir') {
       f[long] = val === 'desc' ? 'desc' : 'asc';
     } else {
@@ -443,6 +499,16 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
   if (f.dns) clauses.push('(dns_a = 1 OR dns_mx = 1 OR dns_ns = 1)');
   if (f.minLen != null) { clauses.push('length >= ?'); params.push(f.minLen); }
   if (f.maxLen != null) { clauses.push('length <= ?'); params.push(f.maxLen); }
+  for (const [column, min, max] of [
+    ['score_total', f.minScoreTotal, f.maxScoreTotal],
+    ['score_brand', f.minScoreBrand, f.maxScoreBrand],
+    ['score_authority', f.minScoreAuthority, f.maxScoreAuthority],
+    ['score_demand', f.minScoreDemand, f.maxScoreDemand],
+    ['score_risk', f.minScoreRisk, f.maxScoreRisk]
+  ] as const) {
+    if (min != null) { clauses.push(`${column} >= ?`); params.push(min); }
+    if (max != null) { clauses.push(`${column} <= ?`); params.push(max); }
+  }
   if (f.watch) {
     if (watchlist.size === 0) { clauses.push('1 = 0'); }
     else {
@@ -596,17 +662,12 @@ function statusChip(r: Row): string {
   return '<span class="sig rel-unknown" title="Inte kollad ännu">?</span>';
 }
 
-function scoreChips(r: Row): string {
-  return `<span class="score total" title="Guldkornspoäng: ${r.score_total}/100">💎 ${r.score_total}</span>` +
-    `<span class="score brand" title="Varumärkespoäng: ${r.score_brand}/100">V${r.score_brand}</span>` +
-    `<span class="score authority" title="SEO- och historikpoäng: ${r.score_authority}/100">S${r.score_authority}</span>` +
-    `<span class="score demand" title="Indikativ efterfrågan: ${r.score_demand}/100">E${r.score_demand}</span>` +
-    `<span class="score risk" title="Riskpoäng: ${r.score_risk}/100 (lägre är bättre)">R${r.score_risk}</span>`;
+function scoreCell(value: number, kind: 'total' | 'brand' | 'authority' | 'demand' | 'risk', title: string): string {
+  return `<span class="score-cell"><span class="score ${kind}" title="${title}: ${value}/100${kind === 'risk' ? ' (lägre är bättre)' : ''}">${kind === 'total' ? '💎 ' : ''}${value}</span></span>`;
 }
 
 function signalsHtml(r: Row): string {
   const out: string[] = [];
-  out.push(scoreChips(r));
   const status = statusChip(r);
   if (status) out.push(status);
   if (r.is_word) out.push('<span class="sig word" title="Är ett svenskt ord">📖</span>');
@@ -633,7 +694,7 @@ function renderRow(idx: number, top: number): string {
   const row = getRow(idx);
   if (!row) {
     return `<div class="row" style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_HEIGHT}px;">
-      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span>
+      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>`;
   }
   const url = iisSearchUrl(row.name);
@@ -644,6 +705,11 @@ function renderRow(idx: number, top: number): string {
     <button class="star${starred ? ' active' : ''}" data-action="star" title="Bevaka (s)">${starred ? '★' : '☆'}</button>
     <a class="visit" href="${siteUrl}" target="_blank" rel="noopener" data-action="open" title="Öppna sajten i ny flik">↗</a>
     <a class="name" href="${url}" target="_blank" rel="noopener" data-action="open">${escapeHtml(row.name)}</a>
+    ${scoreCell(row.score_total, 'total', 'Guldkornspoäng')}
+    ${scoreCell(row.score_brand, 'brand', 'Varumärkespoäng')}
+    ${scoreCell(row.score_authority, 'authority', 'SEO- och historikpoäng')}
+    ${scoreCell(row.score_demand, 'demand', 'Indikativ efterfrågan')}
+    ${scoreCell(row.score_risk, 'risk', 'Riskpoäng')}
     <span class="signals">${signalsHtml(row)}</span>
     <span class="len">${row.length}</span>
     <span class="date">${escapeHtml(row.release_at)}</span>
@@ -729,6 +795,16 @@ function renderActivePills() {
   }
   if (f.minLen != null) pills.push({ label: `len≥${f.minLen}`, clear: () => { writeFilters({ minLen: null }); refresh(); } });
   if (f.maxLen != null) pills.push({ label: `len≤${f.maxLen}`, clear: () => { writeFilters({ maxLen: null }); refresh(); } });
+  for (const [label, minKey, maxKey] of [
+    ['total', 'minScoreTotal', 'maxScoreTotal'],
+    ['varumärke', 'minScoreBrand', 'maxScoreBrand'],
+    ['SEO', 'minScoreAuthority', 'maxScoreAuthority'],
+    ['efterfrågan', 'minScoreDemand', 'maxScoreDemand'],
+    ['risk', 'minScoreRisk', 'maxScoreRisk']
+  ] as const) {
+    if (f[minKey] != null) pills.push({ label: `${label}≥${f[minKey]}`, clear: () => { writeFilters({ [minKey]: null } as Partial<Filters>); refresh(); } });
+    if (f[maxKey] != null) pills.push({ label: `${label}≤${f[maxKey]}`, clear: () => { writeFilters({ [maxKey]: null } as Partial<Filters>); refresh(); } });
+  }
 
   if (pills.length === 0) {
     els.activePills.classList.add('hidden');
@@ -750,7 +826,12 @@ function renderBadges() {
   // Räkna props/qual som är aktiva för att visa siffra på popover-knapp
   const f = readFilters();
   const propsActive = [f.noDigit, f.noHyphen, f.onlyDigits, f.onlyLetters, f.palindrome, f.repeat, f.cvcv, f.minLen != null, f.maxLen != null].filter(Boolean).length;
-  const qualActive = [f.word, f.tranco, f.majestic, f.opr, f.cc, f.wayback, f.dns, f.watch, f.notes].filter(Boolean).length;
+  const qualActive = [
+    f.word, f.tranco, f.majestic, f.opr, f.cc, f.wayback, f.dns, f.watch, f.notes,
+    f.minScoreTotal != null, f.maxScoreTotal != null, f.minScoreBrand != null, f.maxScoreBrand != null,
+    f.minScoreAuthority != null, f.maxScoreAuthority != null, f.minScoreDemand != null, f.maxScoreDemand != null,
+    f.minScoreRisk != null, f.maxScoreRisk != null
+  ].filter(Boolean).length;
   if (propsActive) { els.propsBadge.textContent = String(propsActive); els.propsBadge.classList.remove('hidden'); els.propsBtn.classList.add('active'); }
   else { els.propsBadge.classList.add('hidden'); els.propsBtn.classList.remove('active'); }
   if (qualActive) { els.qualBadge.textContent = String(qualActive); els.qualBadge.classList.remove('hidden'); els.qualBtn.classList.add('active'); }
@@ -1237,6 +1318,13 @@ function wireUi() {
   }
   els.fMinLen.addEventListener('input', debouncedRefresh);
   els.fMaxLen.addEventListener('input', debouncedRefresh);
+  for (const el of [
+    els.fScoreTotalMin, els.fScoreTotalMax, els.fScoreBrandMin, els.fScoreBrandMax,
+    els.fScoreAuthorityMin, els.fScoreAuthorityMax, els.fScoreDemandMin, els.fScoreDemandMax,
+    els.fScoreRiskMin, els.fScoreRiskMax
+  ]) {
+    el.addEventListener('input', debouncedRefresh);
+  }
 
   // Reset
   els.reset.addEventListener('click', () => resetAll());
@@ -1249,7 +1337,7 @@ function wireUi() {
         currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
       } else {
         currentSort.key = k;
-        currentSort.dir = k === 'score_total' || k === 'majestic_refsubnets' || k === 'opr_score' ? 'desc' : 'asc';
+        currentSort.dir = k === 'score_risk' || k === 'name' || k === 'length' || k === 'release_at' ? 'asc' : 'desc';
       }
       refresh();
     });

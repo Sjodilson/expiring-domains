@@ -106,7 +106,29 @@
               <button type="button" id="qual-btn" class="popover-btn px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-md text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
                 Kvalitet <span id="qual-badge" class="hidden ml-1 inline-flex items-center justify-center w-4 h-4 text-xs bg-blue-500 text-white rounded-full"></span> ▾
               </button>
-              <div id="qual-pop" class="popover hidden absolute right-0 mt-1 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-30 p-3 space-y-1.5 text-sm">
+              <div id="qual-pop" class="popover hidden absolute right-0 mt-1 w-96 max-w-[calc(100vw-2rem)] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-30 p-3 space-y-1.5 text-sm">
+                <div class="pb-2 mb-2 border-b border-slate-200 dark:border-slate-700">
+                  <div class="grid grid-cols-[1fr_64px_64px] gap-2 items-center text-xs">
+                    <span class="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Poäng</span>
+                    <span class="text-center text-slate-400">Min</span>
+                    <span class="text-center text-slate-400">Max</span>
+                    <label for="f-score-total-min">💎 Total</label>
+                    <input id="f-score-total-min" aria-label="Minsta totalpoäng" type="number" min="0" max="100" placeholder="0" class="score-filter" />
+                    <input id="f-score-total-max" aria-label="Högsta totalpoäng" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                    <label for="f-score-brand-min">Varumärke</label>
+                    <input id="f-score-brand-min" aria-label="Minsta varumärkespoäng" type="number" min="0" max="100" placeholder="0" class="score-filter" />
+                    <input id="f-score-brand-max" aria-label="Högsta varumärkespoäng" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                    <label for="f-score-authority-min">SEO &amp; historik</label>
+                    <input id="f-score-authority-min" aria-label="Minsta SEO- och historikpoäng" type="number" min="0" max="100" placeholder="0" class="score-filter" />
+                    <input id="f-score-authority-max" aria-label="Högsta SEO- och historikpoäng" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                    <label for="f-score-demand-min">Efterfrågan</label>
+                    <input id="f-score-demand-min" aria-label="Minsta efterfrågepoäng" type="number" min="0" max="100" placeholder="0" class="score-filter" />
+                    <input id="f-score-demand-max" aria-label="Högsta efterfrågepoäng" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                    <label for="f-score-risk-min" title="Lägre är bättre">Risk ↓</label>
+                    <input id="f-score-risk-min" aria-label="Minsta riskpoäng" type="number" min="0" max="100" placeholder="0" class="score-filter" />
+                    <input id="f-score-risk-max" aria-label="Högsta riskpoäng" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                  </div>
+                </div>
                 <label class="flex items-center gap-1.5"><input id="f-word" type="checkbox" class="rounded" /> 📖 Är ett svenskt ord</label>
                 <label class="flex items-center gap-1.5"><input id="f-tranco" type="checkbox" class="rounded" /> ⭐ I Tranco Top 1M</label>
                 <label class="flex items-center gap-1.5"><input id="f-majestic" type="checkbox" class="rounded" /> 🔗 I Majestic Million (har backlinks)</label>
@@ -168,12 +190,17 @@
       <!-- Main: tabell + sidopanel -->
       <main class="max-w-[1500px] w-full mx-auto px-4 py-3 flex-1 grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-4 min-h-0">
         <div class="flex flex-col min-w-0">
-          <div class="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 flex flex-col overflow-hidden min-h-[400px]">
-            <div id="thead" class="grid grid-cols-[28px_20px_minmax(0,1fr)_auto_60px_110px_30px] gap-2 px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 select-none">
+          <div class="domain-table rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 flex flex-col min-h-[400px]">
+            <div id="thead" class="grid gap-2 px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 select-none">
               <div></div>
               <div></div>
               <button type="button" data-sort="name" class="th-sort text-left">Domän <span class="sort-ind"></span></button>
-              <button type="button" data-sort="score_total" class="th-sort justify-end" title="Guldkornspoäng samt varumärke, SEO, efterfrågan och risk">Poäng / signaler <span class="sort-ind"></span></button>
+              <button type="button" data-sort="score_total" class="th-sort justify-center" title="Sammanvägd guldkornspoäng">Total <span class="sort-ind"></span></button>
+              <button type="button" data-sort="score_brand" class="th-sort justify-center" title="Varumärkespoäng">Varum. <span class="sort-ind"></span></button>
+              <button type="button" data-sort="score_authority" class="th-sort justify-center" title="SEO- och historikpoäng">SEO <span class="sort-ind"></span></button>
+              <button type="button" data-sort="score_demand" class="th-sort justify-center" title="Indikativ efterfrågan">Efterfr. <span class="sort-ind"></span></button>
+              <button type="button" data-sort="score_risk" class="th-sort justify-center" title="Riskpoäng, lägre är bättre">Risk <span class="sort-ind"></span></button>
+              <div class="text-left">Signaler</div>
               <button type="button" data-sort="length" class="th-sort text-left">Len <span class="sort-ind"></span></button>
               <button type="button" data-sort="release_at" class="th-sort text-left">Frisläpps <span class="sort-ind"></span></button>
               <div></div>
