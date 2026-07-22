@@ -16,6 +16,7 @@ webbläsaren via en SQLite-databas (sql.js) — inga uppgifter skickas vidare.
 - Topplistor för bästa domäner nästa 24 timmar och bästa bekräftat lediga nu
 - Äldre guldkorn: lediga .se/.nu från Tranco, Majestic Million eller Open PageRank Top 10M
 - Beständig rankningsbevakning som prioriterar nya kandidater och återkontrollerar lediga dagligen
+- Sorterbar och filtrerbar Ahrefs Domain Rating med direktlänk till förifylld Backlink Checker
 - Uppdateras varje timme via GitHub Actions (full berikning kl 05 UTC)
 
 ## Kör lokalt
@@ -46,6 +47,12 @@ per körning. Nya och okontrollerade kandidater prioriteras, lediga kontrolleras
 ungefär dagligen och upptagna ungefär månadsvis. En kandidat inaktiveras först
 efter tre lyckade rankningskörningar där den saknas.
 
+Ahrefs DR hämtas från det kostnadsfria API:t i högst 75 anrop per körning,
+cachas i 30 dagar och stryps till under 60 anrop/minut. Lägg API-nyckeln som
+repository secret med namnet `AHREFS_API_KEY`; om den saknas hoppas DR-steget
+över utan att resten av bygget påverkas. API-nyckeln får aldrig läggas i en fil
+eller i den publika SQLite-databasen.
+
 Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 
 ## Datakällor
@@ -55,6 +62,10 @@ Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 - https://tranco-list.eu/
 - https://majestic.com/reports/majestic-million
 - https://www.domcop.com/openpagerank/
+- https://api.ahrefs.com/v3/public/domain-rating-free
+
+Ahrefs-värden visas med attributionen
+[Domain Rating by Ahrefs](https://ahrefs.com/) enligt deras licensvillkor.
 
 Datan beskriver domäner i karenstid (perioden mellan utgångsdatum och
 frisläppsdatum). `release_at` är datumet då domänen blir tillgänglig att

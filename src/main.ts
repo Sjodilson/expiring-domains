@@ -29,8 +29,12 @@ interface Meta {
     dns_checked?: number;
     dns_active?: number;
     dns_errors?: number;
+    ahrefs_dr_checked?: number;
+    ahrefs_dr_hits?: number;
+    ahrefs_dr_errors?: number;
     coverage_wayback?: number;
     coverage_dns?: number;
+    coverage_ahrefs_dr?: number;
   };
   ranked?: {
     candidates?: number;
@@ -73,6 +77,10 @@ interface Row {
   opr_rank: number | null;
   opr_score: number | null;
   cc_hosts: number | null;
+  ahrefs_dr: number | null;
+  ahrefs_dr_checked_at: string | null;
+  ahrefs_dr_status: string | null;
+  ahrefs_dr_error: string | null;
   score_brand: number;
   score_authority: number;
   score_demand: number;
@@ -94,7 +102,7 @@ interface Row {
 type View = 'karens' | 'released' | 'upcoming' | 'free' | 'ranked';
 type SortKey = 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score' |
   'score_total' | 'score_brand' | 'score_authority' | 'score_demand' | 'score_risk' |
-  'tranco_rank' | 'majestic_rank' | 'opr_rank';
+  'tranco_rank' | 'majestic_rank' | 'opr_rank' | 'ahrefs_dr';
 
 interface Filters {
   q: string;
@@ -116,6 +124,7 @@ interface Filters {
   tranco: boolean;
   majestic: boolean;
   opr: boolean;
+  ahrefs: boolean;
   cc: boolean;
   wayback: boolean;
   dns: boolean;
@@ -139,6 +148,8 @@ interface Filters {
   maxMajesticRank: number | null;
   minOprRank: number | null;
   maxOprRank: number | null;
+  minAhrefsDr: number | null;
+  maxAhrefsDr: number | null;
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -146,7 +157,7 @@ const DEFAULT_FILTERS: Filters = {
   sortKey: 'release_at', sortDir: 'asc',
   noDigit: false, noHyphen: false, onlyDigits: false, onlyLetters: false,
   palindrome: false, repeat: false, cvcv: false,
-  word: false, tranco: false, majestic: false, opr: false, cc: false, wayback: false, dns: false,
+  word: false, tranco: false, majestic: false, opr: false, ahrefs: false, cc: false, wayback: false, dns: false,
   watch: false, notes: false, minLen: null, maxLen: null,
   minScoreTotal: null, maxScoreTotal: null,
   minScoreBrand: null, maxScoreBrand: null,
@@ -155,7 +166,8 @@ const DEFAULT_FILTERS: Filters = {
   minScoreRisk: null, maxScoreRisk: null,
   minTrancoRank: null, maxTrancoRank: null,
   minMajesticRank: null, maxMajesticRank: null,
-  minOprRank: null, maxOprRank: null
+  minOprRank: null, maxOprRank: null,
+  minAhrefsDr: null, maxAhrefsDr: null
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -184,6 +196,7 @@ const els = {
   fTranco: $<HTMLInputElement>('f-tranco'),
   fMajestic: $<HTMLInputElement>('f-majestic'),
   fOpr: $<HTMLInputElement>('f-opr'),
+  fAhrefs: $<HTMLInputElement>('f-ahrefs'),
   fCc: $<HTMLInputElement>('f-cc'),
   fWayback: $<HTMLInputElement>('f-wayback'),
   fDns: $<HTMLInputElement>('f-dns'),
@@ -207,6 +220,8 @@ const els = {
   fMajesticRankMax: $<HTMLInputElement>('f-majestic-rank-max'),
   fOprRankMin: $<HTMLInputElement>('f-opr-rank-min'),
   fOprRankMax: $<HTMLInputElement>('f-opr-rank-max'),
+  fAhrefsDrMin: $<HTMLInputElement>('f-ahrefs-dr-min'),
+  fAhrefsDrMax: $<HTMLInputElement>('f-ahrefs-dr-max'),
   reset: $<HTMLButtonElement>('reset'),
   viewport: $('viewport'),
   spacer: $('spacer'),
@@ -311,6 +326,9 @@ function debounce<T extends (...args: never[]) => void>(fn: T, ms: number): T {
 function iisSearchUrl(name: string): string {
   return `https://internetstiftelsen.se/domaner/?lang=se&q=${encodeURIComponent(name)}`;
 }
+function ahrefsBacklinkUrl(name: string): string {
+  return `https://ahrefs.com/backlink-checker/?input=${encodeURIComponent(name)}&mode=subdomains`;
+}
 function todayISO(): string { return new Date().toISOString().slice(0, 10); }
 function isoPlusDays(days: number): string {
   const d = new Date(); d.setDate(d.getDate() + days);
@@ -341,6 +359,7 @@ function readFilters(): Filters {
     tranco: els.fTranco.checked,
     majestic: els.fMajestic.checked,
     opr: els.fOpr.checked,
+    ahrefs: els.fAhrefs.checked,
     cc: els.fCc.checked,
     wayback: els.fWayback.checked,
     dns: els.fDns.checked,
@@ -363,7 +382,9 @@ function readFilters(): Filters {
     minMajesticRank: els.fMajesticRankMin.value ? parseInt(els.fMajesticRankMin.value, 10) : null,
     maxMajesticRank: els.fMajesticRankMax.value ? parseInt(els.fMajesticRankMax.value, 10) : null,
     minOprRank: els.fOprRankMin.value ? parseInt(els.fOprRankMin.value, 10) : null,
-    maxOprRank: els.fOprRankMax.value ? parseInt(els.fOprRankMax.value, 10) : null
+    maxOprRank: els.fOprRankMax.value ? parseInt(els.fOprRankMax.value, 10) : null,
+    minAhrefsDr: els.fAhrefsDrMin.value ? parseInt(els.fAhrefsDrMin.value, 10) : null,
+    maxAhrefsDr: els.fAhrefsDrMax.value ? parseInt(els.fAhrefsDrMax.value, 10) : null
   };
 }
 
@@ -387,6 +408,7 @@ function writeFilters(f: Partial<Filters>) {
   if (f.tranco !== undefined) els.fTranco.checked = f.tranco;
   if (f.majestic !== undefined) els.fMajestic.checked = f.majestic;
   if (f.opr !== undefined) els.fOpr.checked = f.opr;
+  if (f.ahrefs !== undefined) els.fAhrefs.checked = f.ahrefs;
   if (f.cc !== undefined) els.fCc.checked = f.cc;
   if (f.wayback !== undefined) els.fWayback.checked = f.wayback;
   if (f.dns !== undefined) els.fDns.checked = f.dns;
@@ -410,6 +432,8 @@ function writeFilters(f: Partial<Filters>) {
   if (f.maxMajesticRank !== undefined) els.fMajesticRankMax.value = f.maxMajesticRank == null ? '' : String(f.maxMajesticRank);
   if (f.minOprRank !== undefined) els.fOprRankMin.value = f.minOprRank == null ? '' : String(f.minOprRank);
   if (f.maxOprRank !== undefined) els.fOprRankMax.value = f.maxOprRank == null ? '' : String(f.maxOprRank);
+  if (f.minAhrefsDr !== undefined) els.fAhrefsDrMin.value = f.minAhrefsDr == null ? '' : String(f.minAhrefsDr);
+  if (f.maxAhrefsDr !== undefined) els.fAhrefsDrMax.value = f.maxAhrefsDr == null ? '' : String(f.maxAhrefsDr);
 }
 
 const currentSort = { key: 'release_at' as Filters['sortKey'], dir: 'asc' as Filters['sortDir'] };
@@ -435,6 +459,9 @@ function buildOrderBy(f: Filters): string {
   if (f.sortKey === 'opr_rank') {
     return `CASE WHEN opr_rank IS NULL THEN 1 ELSE 0 END, opr_rank ${dir}, name ASC`;
   }
+  if (f.sortKey === 'ahrefs_dr') {
+    return `CASE WHEN ahrefs_dr IS NULL THEN 1 ELSE 0 END, ahrefs_dr ${dir}, name ASC`;
+  }
   if (f.sortKey === 'score_total') return `score_total ${dir}, score_authority DESC, name ASC`;
   if (f.sortKey === 'score_brand') return `score_brand ${dir}, score_total DESC, name ASC`;
   if (f.sortKey === 'score_authority') return `score_authority ${dir}, score_total DESC, name ASC`;
@@ -452,13 +479,13 @@ const SHORT_KEY: Record<string, string> = {
   sortKey: 'sk', sortDir: 'sd',
   noDigit: 'nd', noHyphen: 'nh', onlyDigits: 'od', onlyLetters: 'ol',
   palindrome: 'pa', repeat: 'rp', cvcv: 'cv',
-  word: 'w', tranco: 'tr', majestic: 'mj', opr: 'op', cc: 'cc', wayback: 'wb', dns: 'dn',
+  word: 'w', tranco: 'tr', majestic: 'mj', opr: 'op', ahrefs: 'ah', cc: 'cc', wayback: 'wb', dns: 'dn',
   watch: 'wl', notes: 'nt', minLen: 'mn', maxLen: 'mx',
   minScoreTotal: 'stn', maxScoreTotal: 'stx', minScoreBrand: 'sbn', maxScoreBrand: 'sbx',
   minScoreAuthority: 'san', maxScoreAuthority: 'sax', minScoreDemand: 'sdn', maxScoreDemand: 'sdx',
   minScoreRisk: 'srn', maxScoreRisk: 'srx',
   minTrancoRank: 'trn', maxTrancoRank: 'trx', minMajesticRank: 'mjn', maxMajesticRank: 'mjx',
-  minOprRank: 'opn', maxOprRank: 'opx'
+  minOprRank: 'opn', maxOprRank: 'opx', minAhrefsDr: 'adn', maxAhrefsDr: 'adx'
 };
 const LONG_KEY: Record<string, keyof Filters> = Object.fromEntries(
   Object.entries(SHORT_KEY).map(([k, v]) => [v, k as keyof Filters])
@@ -474,12 +501,12 @@ function filtersToQs(f: Filters): string {
   if (f.to) p.set(SHORT_KEY.to, f.to);
   if (f.sortKey !== 'release_at') p.set(SHORT_KEY.sortKey, f.sortKey);
   if (f.sortDir !== 'asc') p.set(SHORT_KEY.sortDir, f.sortDir);
-  for (const k of ['noDigit','noHyphen','onlyDigits','onlyLetters','palindrome','repeat','cvcv','word','tranco','majestic','opr','cc','wayback','dns','watch','notes'] as const) {
+  for (const k of ['noDigit','noHyphen','onlyDigits','onlyLetters','palindrome','repeat','cvcv','word','tranco','majestic','opr','ahrefs','cc','wayback','dns','watch','notes'] as const) {
     if (f[k]) p.set(SHORT_KEY[k], '1');
   }
   if (f.minLen != null) p.set(SHORT_KEY.minLen, String(f.minLen));
   if (f.maxLen != null) p.set(SHORT_KEY.maxLen, String(f.maxLen));
-  for (const k of ['minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk','minTrancoRank','maxTrancoRank','minMajesticRank','maxMajesticRank','minOprRank','maxOprRank'] as const) {
+  for (const k of ['minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk','minTrancoRank','maxTrancoRank','minMajesticRank','maxMajesticRank','minOprRank','maxOprRank','minAhrefsDr','maxAhrefsDr'] as const) {
     if (f[k] != null) p.set(SHORT_KEY[k], String(f[k]));
   }
   return p.toString();
@@ -491,7 +518,7 @@ function qsToFilters(qs: string): Partial<Filters> {
   for (const [short, val] of p.entries()) {
     const long = LONG_KEY[short];
     if (!long) continue;
-    if (['minLen','maxLen','minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk','minTrancoRank','maxTrancoRank','minMajesticRank','maxMajesticRank','minOprRank','maxOprRank'].includes(long)) {
+    if (['minLen','maxLen','minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk','minTrancoRank','maxTrancoRank','minMajesticRank','maxMajesticRank','minOprRank','maxOprRank','minAhrefsDr','maxAhrefsDr'].includes(long)) {
       const n = parseInt(val, 10);
       f[long] = isNaN(n) ? null : n;
     } else if (long === 'q' || long === 'tld' || long === 'from' || long === 'to') {
@@ -499,7 +526,7 @@ function qsToFilters(qs: string): Partial<Filters> {
     } else if (long === 'view') {
       f[long] = val === 'released' || val === 'upcoming' || val === 'free' || val === 'ranked' ? val : 'karens';
     } else if (long === 'sortKey') {
-      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total', 'score_brand', 'score_authority', 'score_demand', 'score_risk', 'tranco_rank', 'majestic_rank', 'opr_rank'].includes(val) ? val : 'release_at';
+      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total', 'score_brand', 'score_authority', 'score_demand', 'score_risk', 'tranco_rank', 'majestic_rank', 'opr_rank', 'ahrefs_dr'].includes(val) ? val : 'release_at';
     } else if (long === 'sortDir') {
       f[long] = val === 'desc' ? 'desc' : 'asc';
     } else {
@@ -552,6 +579,7 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
   if (f.tranco) clauses.push('tranco_rank IS NOT NULL');
   if (f.majestic) clauses.push('majestic_rank IS NOT NULL');
   if (f.opr) clauses.push('opr_rank IS NOT NULL');
+  if (f.ahrefs) clauses.push('ahrefs_dr > 0');
   if (f.cc) clauses.push('cc_hosts IS NOT NULL');
   if (f.wayback) clauses.push('wayback_count > 0');
   if (f.dns) clauses.push('(dns_a = 1 OR dns_mx = 1 OR dns_ns = 1)');
@@ -570,7 +598,8 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
   for (const [column, min, max] of [
     ['tranco_rank', f.minTrancoRank, f.maxTrancoRank],
     ['majestic_rank', f.minMajesticRank, f.maxMajesticRank],
-    ['opr_rank', f.minOprRank, f.maxOprRank]
+    ['opr_rank', f.minOprRank, f.maxOprRank],
+    ['ahrefs_dr', f.minAhrefsDr, f.maxAhrefsDr]
   ] as const) {
     if (min != null) { clauses.push(`${column} >= ?`); params.push(min); }
     if (max != null) { clauses.push(`${column} <= ?`); params.push(max); }
@@ -613,6 +642,10 @@ function rowFromObject(o: Record<string, unknown>): Row {
     dns_error: o.dns_error == null ? null : String(o.dns_error),
     opr_rank: num('opr_rank'), opr_score: num('opr_score'),
     cc_hosts: num('cc_hosts'),
+    ahrefs_dr: num('ahrefs_dr'),
+    ahrefs_dr_checked_at: o.ahrefs_dr_checked_at == null ? null : String(o.ahrefs_dr_checked_at),
+    ahrefs_dr_status: o.ahrefs_dr_status == null ? null : String(o.ahrefs_dr_status),
+    ahrefs_dr_error: o.ahrefs_dr_error == null ? null : String(o.ahrefs_dr_error),
     score_brand: Number(o.score_brand), score_authority: Number(o.score_authority),
     score_demand: Number(o.score_demand), score_risk: Number(o.score_risk),
     score_total: Number(o.score_total),
@@ -630,7 +663,7 @@ function rowFromObject(o: Record<string, unknown>): Row {
   };
 }
 
-const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error, opr_rank, opr_score, cc_hosts, score_brand, score_authority, score_demand, score_risk, score_total, released, taken, taken_at, avail_checked_at, availability_status, availability_error, in_release_feed, ranked_candidate, ranking_first_seen_at, ranking_last_seen_at, first_free_at';
+const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error, opr_rank, opr_score, cc_hosts, ahrefs_dr, ahrefs_dr_checked_at, ahrefs_dr_status, ahrefs_dr_error, score_brand, score_authority, score_demand, score_risk, score_total, released, taken, taken_at, avail_checked_at, availability_status, availability_error, in_release_feed, ranked_candidate, ranking_first_seen_at, ranking_last_seen_at, first_free_at';
 
 function runCount(f: Filters): number {
   if (!db) return 0;
@@ -744,6 +777,16 @@ function rankCell(rank: number | null, title: string, detail = ''): string {
   return `<span class="rank-cell hit" title="${escapeHtml(tooltip)}">#${rank.toLocaleString('sv-SE')}</span>`;
 }
 
+function ahrefsDrCell(r: Row): string {
+  const value = r.ahrefs_dr == null ? '—' : r.ahrefs_dr.toFixed(1).replace(/\.0$/, '');
+  const state = r.ahrefs_dr != null
+    ? `Domain Rating by Ahrefs: ${value}/100 · kontrollerad ${fmtTime(r.ahrefs_dr_checked_at)}`
+    : r.ahrefs_dr_status === 'error'
+      ? `Ahrefs-kontrollfel${r.ahrefs_dr_error ? `: ${r.ahrefs_dr_error}` : ''}`
+      : 'Ahrefs DR väntar på kontroll';
+  return `<a class="ahrefs-dr-cell${r.ahrefs_dr != null ? ' hit' : ''}" href="${ahrefsBacklinkUrl(r.name)}" target="_blank" rel="noopener" title="${escapeHtml(state)} · öppna Backlink Checker">${value}<span aria-hidden="true"> ↗</span></a>`;
+}
+
 function signalsHtml(r: Row): string {
   const out: string[] = [];
   const status = statusChip(r);
@@ -752,6 +795,7 @@ function signalsHtml(r: Row): string {
   if (r.tranco_rank != null) out.push(`<span class="sig tranco" title="Tranco-rank ${r.tranco_rank.toLocaleString('sv-SE')}">⭐</span>`);
   if (r.majestic_rank != null) out.push(`<span class="sig majestic" title="Majestic-rank ${r.majestic_rank.toLocaleString('sv-SE')} · ${r.majestic_refsubnets ?? 0} ref-subnät">🔗</span>`);
   if (r.opr_rank != null) out.push(`<span class="sig opr" title="Open PageRank #${r.opr_rank.toLocaleString('sv-SE')} · poäng ${r.opr_score ?? '?'}">📊</span>`);
+  if ((r.ahrefs_dr ?? 0) > 0) out.push(`<span class="sig ahrefs" title="Domain Rating by Ahrefs: ${r.ahrefs_dr?.toFixed(1)}">🟠</span>`);
   if (r.cc_hosts != null) out.push(`<span class="sig cc" title="Common Crawl: ${r.cc_hosts} host(s)">🌐</span>`);
   if ((r.wayback_count ?? 0) > 0) out.push(`<span class="sig wayback" title="${r.wayback_count} Wayback-snapshots">⏳</span>`);
   if (r.dns_checked && (r.dns_a || r.dns_mx || r.dns_ns)) {
@@ -772,7 +816,7 @@ function renderRow(idx: number, top: number): string {
   const row = getRow(idx);
   if (!row) {
     return `<div class="row" style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_HEIGHT}px;">
-      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>`;
   }
   const url = iisSearchUrl(row.name);
@@ -788,6 +832,7 @@ function renderRow(idx: number, top: number): string {
     ${scoreCell(row.score_authority, 'authority', 'SEO- och historikpoäng')}
     ${scoreCell(row.score_demand, 'demand', 'Indikativ efterfrågan')}
     ${scoreCell(row.score_risk, 'risk', 'Riskpoäng')}
+    ${ahrefsDrCell(row)}
     ${rankCell(row.majestic_rank, 'Majestic-rank', `${row.majestic_refsubnets ?? 0} ref-subnät`)}
     ${rankCell(row.opr_rank, 'Open PageRank', `poäng ${row.opr_score?.toFixed(2) ?? '?'}`)}
     ${rankCell(row.tranco_rank, 'Tranco-rank')}
@@ -868,7 +913,7 @@ function renderActivePills() {
   const propLabels: Record<string, string> = {
     noDigit: 'inga siffror', noHyphen: 'inga bindestreck', onlyDigits: 'endast siffror', onlyLetters: 'endast bokstäver',
     palindrome: 'palindrom', repeat: 'upprepning', cvcv: 'uttalbart',
-    word: '📖 ord', tranco: '⭐ Tranco', majestic: '🔗 backlinks', opr: '📊 OPR', cc: '🌐 Common Crawl', wayback: '⏳ wayback', dns: '📡 dns',
+    word: '📖 ord', tranco: '⭐ Tranco', majestic: '🔗 backlinks', opr: '📊 OPR', ahrefs: '🟠 Ahrefs DR', cc: '🌐 Common Crawl', wayback: '⏳ wayback', dns: '📡 dns',
     watch: '🔖 bevakade', notes: '📝 antecknade'
   };
   for (const k of Object.keys(propLabels) as (keyof Filters)[]) {
@@ -889,7 +934,8 @@ function renderActivePills() {
   for (const [label, minKey, maxKey] of [
     ['Tranco-rank', 'minTrancoRank', 'maxTrancoRank'],
     ['Majestic-rank', 'minMajesticRank', 'maxMajesticRank'],
-    ['OPR-rank', 'minOprRank', 'maxOprRank']
+    ['OPR-rank', 'minOprRank', 'maxOprRank'],
+    ['Ahrefs DR', 'minAhrefsDr', 'maxAhrefsDr']
   ] as const) {
     if (f[minKey] != null) pills.push({ label: `${label}≥${f[minKey]}`, clear: () => { writeFilters({ [minKey]: null } as Partial<Filters>); refresh(); } });
     if (f[maxKey] != null) pills.push({ label: `${label}≤${f[maxKey]}`, clear: () => { writeFilters({ [maxKey]: null } as Partial<Filters>); refresh(); } });
@@ -916,12 +962,12 @@ function renderBadges() {
   const f = readFilters();
   const propsActive = [f.noDigit, f.noHyphen, f.onlyDigits, f.onlyLetters, f.palindrome, f.repeat, f.cvcv, f.minLen != null, f.maxLen != null].filter(Boolean).length;
   const qualActive = [
-    f.word, f.tranco, f.majestic, f.opr, f.cc, f.wayback, f.dns, f.watch, f.notes,
+    f.word, f.tranco, f.majestic, f.opr, f.ahrefs, f.cc, f.wayback, f.dns, f.watch, f.notes,
     f.minScoreTotal != null, f.maxScoreTotal != null, f.minScoreBrand != null, f.maxScoreBrand != null,
     f.minScoreAuthority != null, f.maxScoreAuthority != null, f.minScoreDemand != null, f.maxScoreDemand != null,
     f.minScoreRisk != null, f.maxScoreRisk != null,
     f.minTrancoRank != null, f.maxTrancoRank != null, f.minMajesticRank != null, f.maxMajesticRank != null,
-    f.minOprRank != null, f.maxOprRank != null
+    f.minOprRank != null, f.maxOprRank != null, f.minAhrefsDr != null, f.maxAhrefsDr != null
   ].filter(Boolean).length;
   if (propsActive) { els.propsBadge.textContent = String(propsActive); els.propsBadge.classList.remove('hidden'); els.propsBtn.classList.add('active'); }
   else { els.propsBadge.classList.add('hidden'); els.propsBtn.classList.remove('active'); }
@@ -1105,7 +1151,7 @@ function drawerOverviewHtml(r: Row): string {
         <strong class="gem-total">💎 ${r.score_total}/100</strong>
       </div>
       ${scoreDetail('Varumärke', r.score_brand, 'brand', 'Längd, stavning, ordträff och uttalbarhet')}
-      ${scoreDetail('SEO & historik', r.score_authority, 'authority', 'Länkar, PageRank, arkivålder och crawl-data')}
+      ${scoreDetail('SEO & historik', r.score_authority, 'authority', 'Ahrefs DR, länkar, PageRank, arkivålder och crawl-data')}
       ${scoreDetail('Efterfrågan', r.score_demand, 'demand', 'Indikativ potential från ord- och popularitetssignaler')}
       ${scoreDetail('Risk', r.score_risk, 'risk', 'Lägre är bättre · teknisk och namnbaserad risk')}
     </section>
@@ -1131,6 +1177,11 @@ function drawerOverviewHtml(r: Row): string {
       ${signalDetail(r.tranco_rank != null, '⭐', 'Tranco-rank', r.tranco_rank != null ? `#${r.tranco_rank.toLocaleString('sv-SE')} av 1 000 000` : 'Inte i topp 1M')}
       ${signalDetail(r.majestic_rank != null, '🔗', 'Backlinks (Majestic)', r.majestic_rank != null ? `Rank #${r.majestic_rank.toLocaleString('sv-SE')} · ${r.majestic_refsubnets ?? 0} ref-subnät` : 'Inga registrerade backlinks')}
       ${signalDetail(r.opr_rank != null, '📊', 'Open PageRank', r.opr_rank != null ? `Rank #${r.opr_rank.toLocaleString('sv-SE')} · poäng ${r.opr_score?.toFixed(2) ?? '?'}` : 'Inte i topp 10M')}
+      ${signalDetail(r.ahrefs_dr != null, '🟠', 'Ahrefs Domain Rating', r.ahrefs_dr != null
+        ? `${r.ahrefs_dr.toFixed(1).replace(/\.0$/, '')}/100 · kontrollerad ${fmtTime(r.ahrefs_dr_checked_at)} · <a class="underline" href="https://ahrefs.com/" target="_blank" rel="noopener">Domain Rating by Ahrefs</a>`
+        : r.ahrefs_dr_status === 'error'
+          ? `Kontrollfel${r.ahrefs_dr_error ? `: ${escapeHtml(r.ahrefs_dr_error)}` : ''}`
+          : 'Väntar på kontroll')}
       ${signalDetail(r.cc_hosts != null, '🌐', 'Common Crawl', r.cc_hosts != null ? `${r.cc_hosts} host(s) i CC web graph` : 'Finns ej i CC web graph')}
       ${signalDetail((r.wayback_count ?? 0) > 0, '⏳', 'Wayback-historik',
         r.wayback_checked
@@ -1154,6 +1205,7 @@ function drawerLinksHtml(r: Row): string {
     { url: `https://urlscan.io/domain/${enc}`, icon: '🔍', label: 'urlscan.io — tidigare aktivitet' },
     { url: `https://who.is/whois/${enc}`, icon: '📜', label: 'who.is — WHOIS-lookup' },
     { url: `https://majestic.com/reports/site-explorer?q=${enc}`, icon: '🔗', label: 'Majestic Site Explorer' },
+    { url: ahrefsBacklinkUrl(r.name), icon: '🟠', label: 'Ahrefs Backlink Checker — domänen är förifylld' },
     { url: `https://${enc}`, icon: '↗', label: 'Försök öppna domänen' }
   ];
   return `<section><div class="grid grid-cols-1 gap-2">${links.map((l) =>
@@ -1262,11 +1314,11 @@ function download(filename: string, content: string, mime: string) {
 }
 function exportCsv() {
   const rows = collectAll();
-  const headers = ['name','tld','release_at','length','score_total','score_brand','score_authority','score_demand','score_risk','is_word','tranco_rank','majestic_rank','majestic_refsubnets','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','dns_status','released','taken','availability_status','ranked_candidate','ranking_first_seen_at','ranking_last_seen_at','first_free_at','avail_checked_at'];
+  const headers = ['name','tld','release_at','length','score_total','score_brand','score_authority','score_demand','score_risk','ahrefs_dr','ahrefs_dr_checked_at','ahrefs_dr_status','is_word','tranco_rank','majestic_rank','majestic_refsubnets','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','dns_status','released','taken','availability_status','ranked_candidate','ranking_first_seen_at','ranking_last_seen_at','first_free_at','avail_checked_at'];
   const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [headers.join(',')];
   for (const r of rows) {
-    lines.push([r.name, r.tld, r.release_at, r.length, r.score_total, r.score_brand, r.score_authority, r.score_demand, r.score_risk, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.majestic_refsubnets ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.dns_status ?? '', r.released, r.taken ?? '', r.availability_status ?? '', r.ranked_candidate, r.ranking_first_seen_at ?? '', r.ranking_last_seen_at ?? '', r.first_free_at ?? '', r.avail_checked_at ?? ''].map(esc).join(','));
+    lines.push([r.name, r.tld, r.release_at, r.length, r.score_total, r.score_brand, r.score_authority, r.score_demand, r.score_risk, r.ahrefs_dr ?? '', r.ahrefs_dr_checked_at ?? '', r.ahrefs_dr_status ?? '', r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.majestic_refsubnets ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.dns_status ?? '', r.released, r.taken ?? '', r.availability_status ?? '', r.ranked_candidate, r.ranking_first_seen_at ?? '', r.ranking_last_seen_at ?? '', r.first_free_at ?? '', r.avail_checked_at ?? ''].map(esc).join(','));
   }
   download(`expiring-domains-${todayISO()}.csv`, lines.join('\n'), 'text/csv');
 }
@@ -1427,7 +1479,7 @@ function wireUi() {
   for (const el of [
     els.fNoDigit, els.fNoHyphen, els.fOnlyDigits, els.fOnlyLetters,
     els.fPalindrome, els.fRepeat, els.fCvcv,
-    els.fWord, els.fTranco, els.fMajestic, els.fOpr, els.fCc, els.fWayback, els.fDns, els.fWatch, els.fNotes
+    els.fWord, els.fTranco, els.fMajestic, els.fOpr, els.fAhrefs, els.fCc, els.fWayback, els.fDns, els.fWatch, els.fNotes
   ]) {
     el.addEventListener('change', refresh);
   }
@@ -1438,7 +1490,7 @@ function wireUi() {
     els.fScoreAuthorityMin, els.fScoreAuthorityMax, els.fScoreDemandMin, els.fScoreDemandMax,
     els.fScoreRiskMin, els.fScoreRiskMax,
     els.fTrancoRankMin, els.fTrancoRankMax, els.fMajesticRankMin, els.fMajesticRankMax,
-    els.fOprRankMin, els.fOprRankMax
+    els.fOprRankMin, els.fOprRankMax, els.fAhrefsDrMin, els.fAhrefsDrMax
   ]) {
     el.addEventListener('input', debouncedRefresh);
   }

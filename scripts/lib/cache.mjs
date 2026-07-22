@@ -50,6 +50,11 @@ export class EnrichmentCache {
     this.ensureColumn('enrichment', 'dns_attempted_at', 'TEXT');
     this.ensureColumn('enrichment', 'dns_status', 'TEXT');
     this.ensureColumn('enrichment', 'dns_error', 'TEXT');
+    this.ensureColumn('enrichment', 'ahrefs_dr', 'REAL');
+    this.ensureColumn('enrichment', 'ahrefs_dr_checked_at', 'TEXT');
+    this.ensureColumn('enrichment', 'ahrefs_dr_attempted_at', 'TEXT');
+    this.ensureColumn('enrichment', 'ahrefs_dr_status', 'TEXT');
+    this.ensureColumn('enrichment', 'ahrefs_dr_error', 'TEXT');
     // Historik över domäner vi sett i karens — låter oss visa nysläppta
     // domäner även efter att de försvunnit ur källfilen
     this.db.exec(`
@@ -170,6 +175,27 @@ export class EnrichmentCache {
         dns_status = 'error',
         dns_error = excluded.dns_error
     `);
+    this.upsertAhrefsDr = this.db.prepare(`
+      INSERT INTO enrichment (
+        domain, ahrefs_dr, ahrefs_dr_checked_at,
+        ahrefs_dr_attempted_at, ahrefs_dr_status, ahrefs_dr_error
+      ) VALUES (?, ?, ?, ?, 'ok', NULL)
+      ON CONFLICT(domain) DO UPDATE SET
+        ahrefs_dr = excluded.ahrefs_dr,
+        ahrefs_dr_checked_at = excluded.ahrefs_dr_checked_at,
+        ahrefs_dr_attempted_at = excluded.ahrefs_dr_attempted_at,
+        ahrefs_dr_status = 'ok',
+        ahrefs_dr_error = NULL
+    `);
+    this.upsertAhrefsDrError = this.db.prepare(`
+      INSERT INTO enrichment (
+        domain, ahrefs_dr_attempted_at, ahrefs_dr_status, ahrefs_dr_error
+      ) VALUES (?, ?, 'error', ?)
+      ON CONFLICT(domain) DO UPDATE SET
+        ahrefs_dr_attempted_at = excluded.ahrefs_dr_attempted_at,
+        ahrefs_dr_status = 'error',
+        ahrefs_dr_error = excluded.ahrefs_dr_error
+    `);
   }
 
   ensureColumn(table, column, definition) {
@@ -193,6 +219,42 @@ export class EnrichmentCache {
 
   setDnsError(domain, error) {
     this.upsertDnsError.run(domain, new Date().toISOString(), error);
+  }
+
+  setAhrefsDr(domain, rating) {
+    const value = Number(rating);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      throw new Error(`Ogiltig Ahrefs DR för ${domain}`);
+    }
+    const now = new Date().toISOString();
+    this.upsertAhrefsDr.run(domain, value, now, now);
+  }
+
+  setAhrefsDrError(domain, error) {
+    this.upsertAhrefsDrError.run(domain, new Date().toISOString(), String(error).slice(0, 250));
+  }
+
+  needsAhrefsDr(domains, maxAgeDays = 30, errorHours = 6) {
+    const checkedCutoff = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
+    const retryCutoff = new Date(Date.now() - errorHours * 3600000).toISOString();
+    const known = new Map();
+    const stmt = this.db.prepare(`
+      SELECT domain, ahrefs_dr_checked_at AS checked,
+        ahrefs_dr_attempted_at AS attempted, ahrefs_dr_status AS status
+      FROM enrichment
+    `);
+    for (const row of stmt.iterate()) known.set(row.domain, row);
+
+    const out = [];
+    for (const domain of domains) {
+      const row = known.get(domain);
+      if (row?.status === 'error') {
+        if (!row.attempted || row.attempted < retryCutoff) out.push(domain);
+      } else if (!row?.checked || row.checked < checkedCutoff) {
+        out.push(domain);
+      }
+    }
+    return out;
   }
 
   // Returnerar domäner som behöver uppdateras (aldrig kollat eller äldre än maxAgeDays)

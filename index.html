@@ -144,12 +144,16 @@
                     <label for="f-opr-rank-min">Open PageRank</label>
                     <input id="f-opr-rank-min" aria-label="Bästa lägsta Open PageRank-rank" type="number" min="1" max="10000000" placeholder="1" class="score-filter" />
                     <input id="f-opr-rank-max" aria-label="Högsta Open PageRank-rank" type="number" min="1" max="10000000" placeholder="10 000 000" class="score-filter" />
+                    <label for="f-ahrefs-dr-min">Ahrefs DR</label>
+                    <input id="f-ahrefs-dr-min" aria-label="Minsta Ahrefs Domain Rating" type="number" min="0" max="100" placeholder="0" class="score-filter" />
+                    <input id="f-ahrefs-dr-max" aria-label="Högsta Ahrefs Domain Rating" type="number" min="0" max="100" placeholder="100" class="score-filter" />
                   </div>
                 </div>
                 <label class="flex items-center gap-1.5"><input id="f-word" type="checkbox" class="rounded" /> 📖 Är ett svenskt ord</label>
                 <label class="flex items-center gap-1.5"><input id="f-tranco" type="checkbox" class="rounded" /> ⭐ I Tranco Top 1M</label>
                 <label class="flex items-center gap-1.5"><input id="f-majestic" type="checkbox" class="rounded" /> 🔗 I Majestic Million (har backlinks)</label>
                 <label class="flex items-center gap-1.5"><input id="f-opr" type="checkbox" class="rounded" /> 📊 I Open PageRank Top 10M</label>
+                <label class="flex items-center gap-1.5"><input id="f-ahrefs" type="checkbox" class="rounded" /> 🟠 Har Ahrefs DR över 0</label>
                 <label class="flex items-center gap-1.5"><input id="f-cc" type="checkbox" class="rounded" /> 🌐 Finns i Common Crawl</label>
                 <label class="flex items-center gap-1.5"><input id="f-wayback" type="checkbox" class="rounded" /> ⏳ Har Wayback-snapshots</label>
                 <label class="flex items-center gap-1.5"><input id="f-dns" type="checkbox" class="rounded" /> 📡 Har aktiva DNS-records</label>
@@ -217,6 +221,10 @@
               <button type="button" data-sort="score_authority" class="th-sort justify-center" title="SEO- och historikpoäng">SEO <span class="sort-ind"></span></button>
               <button type="button" data-sort="score_demand" class="th-sort justify-center" title="Indikativ efterfrågan">Efterfr. <span class="sort-ind"></span></button>
               <button type="button" data-sort="score_risk" class="th-sort justify-center" title="Riskpoäng, lägre är bättre">Risk <span class="sort-ind"></span></button>
+              <div class="ahrefs-head" title="Domain Rating på skalan 0–100">
+                <button type="button" data-sort="ahrefs_dr" class="th-sort justify-end">DR <span class="sort-ind"></span></button>
+                <a href="https://ahrefs.com/" target="_blank" rel="noopener">by Ahrefs</a>
+              </div>
               <button type="button" data-sort="majestic_rank" class="th-sort justify-end" title="Majestic Million-rank, lägre är bättre">Majestic <span class="sort-ind"></span></button>
               <button type="button" data-sort="opr_rank" class="th-sort justify-end" title="Open PageRank Top 10M, lägre är bättre">OPR <span class="sort-ind"></span></button>
               <button type="button" data-sort="tranco_rank" class="th-sort justify-end" title="Tranco Top 1M, lägre är bättre">Tranco <span class="sort-ind"></span></button>
@@ -308,6 +316,7 @@
               <li>🔗 Backlinks (Majestic)</li>
               <li>⏳ Wayback-snapshots</li>
               <li>📡 Aktiva DNS-records</li>
+              <li>🟠 Domain Rating by Ahrefs</li>
               <li>Poäng och rankingar visas i egna sorterbara kolumner.</li>
               <li>↔ Palindrom · 🗣 Uttalbart</li>
             </ul>
@@ -333,6 +342,7 @@
             <a class="underline" href="https://tranco-list.eu/" target="_blank" rel="noopener">Tranco</a> ·
             <a class="underline" href="https://majestic.com/reports/majestic-million" target="_blank" rel="noopener">Majestic Million</a> ·
             <a class="underline" href="https://www.domcop.com/openpagerank/" target="_blank" rel="noopener">Open PageRank</a> ·
+            <a class="underline" href="https://ahrefs.com/" target="_blank" rel="noopener">Domain Rating by Ahrefs</a> ·
             <a class="underline" href="https://web.archive.org/" target="_blank" rel="noopener">Wayback</a>
           </span>
           <span>All bearbetning sker lokalt i din webbläsare.</span>

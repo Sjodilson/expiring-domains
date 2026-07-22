@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Persistent enrichment cache (Wayback + DNS resultat)
+      # Persistent enrichment cache (Wayback + DNS + Ahrefs DR)
       - name: Restore enrichment cache
         id: cache-enrichment
         uses: actions/cache@v4
@@ -56,8 +56,12 @@ jobs:
           # Hård gräns: första backfillen blir klar på cirka tio timkörningar.
           # Därefter återstår normalt bara nya och förfallna återkontroller.
           echo "RANKED_AVAIL_MAX=5000" >> "$GITHUB_ENV"
+          # Gratis DR-endpoint, strypt till under Ahrefs gräns 60 anrop/minut.
+          echo "AHREFS_DR_MAX=75" >> "$GITHUB_ENV"
 
       - name: Fetch data and build SQLite
+        env:
+          AHREFS_API_KEY: ${{ secrets.AHREFS_API_KEY }}
         run: npm run build:data
 
       - name: Save enrichment cache

@@ -1,6 +1,6 @@
 // Bygger public/domains.sqlite + public/meta.json från Internetstiftelsens
 // bardate-data, berikat med ordlista, Tranco, Majestic, Open PageRank,
-// Common Crawl web graph, Wayback och DNS.
+// Common Crawl web graph, Wayback, DNS och Ahrefs Domain Rating.
 
 import { mkdirSync, rmSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -14,10 +14,11 @@ import { enrichDns, checkAvailability, checkRankedAvailability } from './lib/dns
 import { loadMajesticMap } from './lib/backlinks.mjs';
 import { loadOpenPageRankMap } from './lib/openpagerank.mjs';
 import { loadCcDomainMap } from './lib/commoncrawl.mjs';
+import { enrichAhrefsDr } from './lib/ahrefs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-const PUBLIC_DIR = join(ROOT, 'public');
+const PUBLIC_DIR = process.env.BUILD_PUBLIC_DIR || join(ROOT, 'public');
 const CACHE_DIR = join(ROOT, 'cache');
 const DB_PATH = join(PUBLIC_DIR, 'domains.sqlite');
 const META_PATH = join(PUBLIC_DIR, 'meta.json');
@@ -47,6 +48,8 @@ const RELEASED_DAYS = parseInt(process.env.RELEASED_DAYS || '90', 10);
 const RANKED_AVAIL_MAX_PER_RUN = parseInt(process.env.RANKED_AVAIL_MAX || '5000', 10);
 const RANKED_FREE_REFRESH_HOURS = parseInt(process.env.RANKED_FREE_REFRESH_HOURS || '23', 10);
 const RANKED_OCCUPIED_REFRESH_DAYS = parseInt(process.env.RANKED_OCCUPIED_REFRESH_DAYS || '30', 10);
+const AHREFS_DR_MAX_PER_RUN = parseInt(process.env.AHREFS_DR_MAX || '75', 10);
+const AHREFS_DR_REFRESH_DAYS = parseInt(process.env.AHREFS_DR_REFRESH_DAYS || '30', 10);
 
 const VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö']);
 
@@ -180,7 +183,7 @@ function logPoints(value, cap, points) {
 
 // Fyra transparenta delpoäng byggda enbart från data som redan finns i pipelinen.
 // Efterfrågan är indikativ tills faktisk sökvolym kopplas på i ett senare steg.
-function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, wbCount }) {
+function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, wbCount, ahrefsDr }) {
   const asciiOrSwedishLetters = /^[a-zåäö]+$/.test(base);
   const hasDigit = /\d/.test(base);
   const hyphens = (base.match(/-/g) || []).length;
@@ -213,6 +216,9 @@ function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, w
   if (trancoRank) {
     authority += Math.max(0, 15 * (1 - Math.log10(Math.max(1, trancoRank)) / 6));
   }
+  // DR sammanfattar länkkraften på samma 0–100-skala. Använd den som golv
+  // i stället för att dubbelräkna samma länkar ovanpå Majestic/OPR.
+  if (ahrefsDr != null) authority = Math.max(authority, ahrefsDr);
 
   let demand = 0;
   if (word) demand += 35;
@@ -282,6 +288,10 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       opr_rank          INTEGER,
       opr_score         REAL,
       cc_hosts          INTEGER,
+      ahrefs_dr         REAL,
+      ahrefs_dr_checked_at TEXT,
+      ahrefs_dr_status  TEXT,
+      ahrefs_dr_error   TEXT,
       score_brand       INTEGER NOT NULL,
       score_authority   INTEGER NOT NULL,
       score_demand      INTEGER NOT NULL,
@@ -310,6 +320,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       wayback_first, wayback_count, wayback_checked,
       dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error,
       opr_rank, opr_score, cc_hosts,
+      ahrefs_dr, ahrefs_dr_checked_at, ahrefs_dr_status, ahrefs_dr_error,
       score_brand, score_authority, score_demand, score_risk, score_total,
       released, taken, taken_at, avail_checked_at, availability_status, availability_error,
       in_release_feed, ranked_candidate, ranking_first_seen_at, ranking_last_seen_at, first_free_at
@@ -321,6 +332,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       @wayback_first, @wayback_count, @wayback_checked,
       @dns_a, @dns_mx, @dns_ns, @dns_checked, @dns_status, @dns_error,
       @opr_rank, @opr_score, @cc_hosts,
+      @ahrefs_dr, @ahrefs_dr_checked_at, @ahrefs_dr_status, @ahrefs_dr_error,
       @score_brand, @score_authority, @score_demand, @score_risk, @score_total,
       @released, @taken, @taken_at, @avail_checked_at, @availability_status, @availability_error,
       @in_release_feed, @ranked_candidate, @ranking_first_seen_at, @ranking_last_seen_at, @first_free_at
@@ -331,6 +343,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
     word: 0, tranco: 0, majestic: 0, opr: 0, cc: 0,
     waybackChecked: 0, waybackHits: 0,
     dnsChecked: 0, dnsAny: 0, dnsErrors: 0,
+    ahrefsChecked: 0, ahrefsHits: 0, ahrefsErrors: 0,
     rankedFree: 0
   };
 
@@ -361,9 +374,13 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       const dnsChecked = cache?.dns_checked_at ? 1 : 0;
       const dnsStatus = cache?.dns_status ?? null;
       const dnsError = cache?.dns_error ?? null;
+      const ahrefsDr = cache?.ahrefs_dr ?? null;
+      const ahrefsDrCheckedAt = cache?.ahrefs_dr_checked_at ?? null;
+      const ahrefsDrStatus = cache?.ahrefs_dr_status ?? null;
+      const ahrefsDrError = cache?.ahrefs_dr_error ?? null;
       const scores = scoreDomain({
         base, word, trancoRank, maj, oprData, ccHosts,
-        wbFirst, wbCount
+        wbFirst, wbCount, ahrefsDr
       });
 
       if (word) stats.word++;
@@ -380,6 +397,11 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         if (dnsA || dnsMx || dnsNs) stats.dnsAny++;
       }
       if (dnsStatus === 'error') stats.dnsErrors++;
+      if (ahrefsDrCheckedAt) {
+        stats.ahrefsChecked++;
+        if ((ahrefsDr ?? 0) > 0) stats.ahrefsHits++;
+      }
+      if (ahrefsDrStatus === 'error') stats.ahrefsErrors++;
       if (r.ranked_candidate) stats.rankedFree++;
 
       insert.run({
@@ -411,6 +433,10 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         opr_rank: oprData?.rank ?? null,
         opr_score: oprData?.score ?? null,
         cc_hosts: ccHosts,
+        ahrefs_dr: ahrefsDr,
+        ahrefs_dr_checked_at: ahrefsDrCheckedAt,
+        ahrefs_dr_status: ahrefsDrStatus,
+        ahrefs_dr_error: ahrefsDrError,
         score_brand: scores.brand,
         score_authority: scores.authority,
         score_demand: scores.demand,
@@ -448,6 +474,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
     CREATE INDEX idx_available_score ON domains(released, availability_status, score_total);
     CREATE INDEX idx_opr ON domains(opr_rank);
     CREATE INDEX idx_cc ON domains(cc_hosts);
+    CREATE INDEX idx_ahrefs_dr ON domains(ahrefs_dr);
     CREATE INDEX idx_released ON domains(released, release_at);
     CREATE INDEX idx_release_feed ON domains(in_release_feed, released, release_at);
     CREATE INDEX idx_ranked_free ON domains(ranked_candidate, availability_status, score_total);
@@ -494,8 +521,12 @@ function buildMeta(rows, stats, totalCount) {
       dns_checked: stats.dnsChecked,
       dns_active: stats.dnsAny,
       dns_errors: stats.dnsErrors,
+      ahrefs_dr_checked: stats.ahrefsChecked,
+      ahrefs_dr_hits: stats.ahrefsHits,
+      ahrefs_dr_errors: stats.ahrefsErrors,
       coverage_wayback: totalCount ? +(stats.waybackChecked / totalCount * 100).toFixed(1) : 0,
-      coverage_dns: totalCount ? +(stats.dnsChecked / totalCount * 100).toFixed(1) : 0
+      coverage_dns: totalCount ? +(stats.dnsChecked / totalCount * 100).toFixed(1) : 0,
+      coverage_ahrefs_dr: totalCount ? +(stats.ahrefsChecked / totalCount * 100).toFixed(1) : 0
     }
   };
 }
@@ -605,6 +636,36 @@ async function main() {
     await enrichWayback(need, cache, { maxPerRun: WAYBACK_MAX_PER_RUN, log });
   } else { warn('SKIP_WAYBACK=1'); }
 
+  if (process.env.SKIP_AHREFS_DR !== '1') {
+    const upcomingNames = future
+      .slice()
+      .sort((a, b) => a.release_at.localeCompare(b.release_at) || a.name.localeCompare(b.name))
+      .map((r) => r.name);
+    const normalizedSourceRank = (domain) => Math.min(
+      tranco?.get(domain) ?? Infinity,
+      majestic?.get(domain)?.rank ?? Infinity,
+      (opr?.get(domain)?.rank ?? Infinity) / 10
+    );
+    const rankedCurrentNames = allDomains
+      .filter((domain) => Number.isFinite(normalizedSourceRank(domain)))
+      .sort((a, b) => normalizedSourceRank(a) - normalizedSourceRank(b) || a.localeCompare(b));
+    const releasedFreeNames = releasedRows
+      .filter((r) => r.avail_status === 'free')
+      .map((r) => r.name);
+    // Först lediga guldkorn, sedan närmaste frisläppningar och redan starka
+    // rankningssignaler. Resten fylls på successivt över kommande körningar.
+    const ahrefsDomains = [...new Set([
+      ...rankedFreeNames,
+      ...releasedFreeNames,
+      ...upcomingNames.slice(0, 1500),
+      ...rankedCurrentNames,
+      ...upcomingNames.slice(1500),
+      ...releasedNames
+    ])];
+    const need = cache.needsAhrefsDr(ahrefsDomains, AHREFS_DR_REFRESH_DAYS);
+    await enrichAhrefsDr(need, cache, { maxPerRun: AHREFS_DR_MAX_PER_RUN, log });
+  } else { warn('SKIP_AHREFS_DR=1'); }
+
   // 4. Hämta cachade berikningar för alla aktuella domäner
   const cacheRows = cache.getMany([...allDomains, ...releasedNames, ...rankedFreeNames]);
   cache.close();
@@ -668,6 +729,7 @@ async function main() {
   log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}, opr=${stats.opr}, cc=${stats.cc}`);
   log(`  Wayback: ${stats.waybackChecked} kollade, ${stats.waybackHits} med snapshots`);
   log(`  DNS: ${stats.dnsChecked} kollade, ${stats.dnsAny} med aktiva records`);
+  log(`  Ahrefs DR: ${stats.ahrefsChecked} kollade, ${stats.ahrefsHits} med DR över 0`);
 
   const meta = buildMeta(future, stats, dbRows.length);
   meta.released = {
