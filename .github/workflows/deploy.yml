@@ -57,7 +57,9 @@ jobs:
           # Därefter återstår normalt bara nya och förfallna återkontroller.
           echo "RANKED_AVAIL_MAX=5000" >> "$GITHUB_ENV"
           # Gratis DR-endpoint, strypt till under Ahrefs gräns 60 anrop/minut.
-          echo "AHREFS_DR_MAX=75" >> "$GITHUB_ENV"
+          # 1 000 anrop tar cirka 18 minuter och kortar den första backfillen
+          # från ungefär 24 dagar till mindre än 2 dagar.
+          echo "AHREFS_DR_MAX=1000" >> "$GITHUB_ENV"
 
       - name: Fetch data and build SQLite
         env:
