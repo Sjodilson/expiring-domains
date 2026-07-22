@@ -258,6 +258,8 @@ body {
 .dark .sig.ahrefs { background: rgb(124 45 18 / 0.5); color: rgb(254 215 170); }
 .sig.wayback { background: rgb(207 250 254); color: rgb(14 116 144); }
 .dark .sig.wayback { background: rgb(22 78 99 / 0.5); color: rgb(207 250 254); }
+.sig.wayback-link { cursor: pointer; text-decoration: none; }
+.sig.wayback-link:hover { box-shadow: 0 0 0 2px rgb(8 145 178 / 0.35); }
 .sig.dns { background: rgb(254 226 226); color: rgb(153 27 27); }
 .dark .sig.dns { background: rgb(127 29 29 / 0.5); color: rgb(254 226 226); }
 .sig.dns-error { background: rgb(254 243 199); color: rgb(146 64 14); font-weight: 700; }

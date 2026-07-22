@@ -329,6 +329,12 @@ function iisSearchUrl(name: string): string {
 function ahrefsBacklinkUrl(name: string): string {
   return `https://ahrefs.com/backlink-checker/?input=${encodeURIComponent(name)}&mode=subdomains`;
 }
+function waybackHistoryUrl(name: string): string {
+  return `https://web.archive.org/web/*/${encodeURIComponent(name)}`;
+}
+function waybackLatestUrl(name: string): string {
+  return `https://web.archive.org/web/2*/${encodeURIComponent(name)}`;
+}
 function todayISO(): string { return new Date().toISOString().slice(0, 10); }
 function isoPlusDays(days: number): string {
   const d = new Date(); d.setDate(d.getDate() + days);
@@ -797,7 +803,10 @@ function signalsHtml(r: Row): string {
   if (r.opr_rank != null) out.push(`<span class="sig opr" title="Open PageRank #${r.opr_rank.toLocaleString('sv-SE')} · poäng ${r.opr_score ?? '?'}">📊</span>`);
   if ((r.ahrefs_dr ?? 0) > 0) out.push(`<span class="sig ahrefs" title="Domain Rating by Ahrefs: ${r.ahrefs_dr?.toFixed(1)}">🟠</span>`);
   if (r.cc_hosts != null) out.push(`<span class="sig cc" title="Common Crawl: ${r.cc_hosts} host(s)">🌐</span>`);
-  if ((r.wayback_count ?? 0) > 0) out.push(`<span class="sig wayback" title="${r.wayback_count} Wayback-snapshots">⏳</span>`);
+  if ((r.wayback_count ?? 0) > 0) {
+    const count = r.wayback_count ?? 0;
+    out.push(`<a class="sig wayback wayback-link" href="${waybackHistoryUrl(r.name)}" target="_blank" rel="noopener" data-action="open" title="${count} Wayback-snapshots · öppna historiken" aria-label="Öppna ${count} Wayback-snapshots för ${escapeHtml(r.name)}">⏳</a>`);
+  }
   if (r.dns_checked && (r.dns_a || r.dns_mx || r.dns_ns)) {
     const parts = [r.dns_a && 'A', r.dns_mx && 'MX', r.dns_ns && 'NS'].filter(Boolean).join(' ');
     out.push(`<span class="sig dns" title="Aktiva DNS-records: ${parts}">📡</span>`);
@@ -1185,7 +1194,9 @@ function drawerOverviewHtml(r: Row): string {
       ${signalDetail(r.cc_hosts != null, '🌐', 'Common Crawl', r.cc_hosts != null ? `${r.cc_hosts} host(s) i CC web graph` : 'Finns ej i CC web graph')}
       ${signalDetail((r.wayback_count ?? 0) > 0, '⏳', 'Wayback-historik',
         r.wayback_checked
-          ? ((r.wayback_count ?? 0) > 0 ? `${r.wayback_count} snapshots${wbFirst ? ` · första ${wbFirst}` : ''}` : 'Inga snapshots')
+          ? ((r.wayback_count ?? 0) > 0
+              ? `${r.wayback_count} snapshots${wbFirst ? ` · första ${wbFirst}` : ''} · <a class="underline" href="${waybackHistoryUrl(r.name)}" target="_blank" rel="noopener">Öppna Wayback ↗</a>`
+              : 'Inga snapshots')
           : 'Inte kollat ännu (kommer i nästa build)'
       )}
       ${signalDetail(dnsActive, '📡', 'Aktiva DNS-records', dnsValue)}
@@ -1197,10 +1208,13 @@ function drawerOverviewHtml(r: Row): string {
 
 function drawerLinksHtml(r: Row): string {
   const enc = encodeURIComponent(r.name);
+  const hasWayback = (r.wayback_count ?? 0) > 0;
   const links = [
     { url: iisSearchUrl(r.name), icon: '🌐', label: 'Internetstiftelsen — sök domänen' },
-    { url: `https://web.archive.org/web/*/${enc}`, icon: '⏳', label: 'Wayback Machine — historik' },
-    { url: `https://web.archive.org/web/2*/${enc}`, icon: '📷', label: 'Wayback senaste snapshot' },
+    ...(hasWayback ? [
+      { url: waybackHistoryUrl(r.name), icon: '⏳', label: `Wayback Machine — ${r.wayback_count} snapshots` },
+      { url: waybackLatestUrl(r.name), icon: '📷', label: 'Wayback — senaste snapshot' }
+    ] : []),
     { url: `https://crt.sh/?q=${enc}`, icon: '🔐', label: 'crt.sh — TLS-certifikat' },
     { url: `https://urlscan.io/domain/${enc}`, icon: '🔍', label: 'urlscan.io — tidigare aktivitet' },
     { url: `https://who.is/whois/${enc}`, icon: '📜', label: 'who.is — WHOIS-lookup' },
