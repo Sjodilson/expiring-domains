@@ -26,6 +26,7 @@ export async function loadMajesticMap(log) {
       count++;
     }
   }
+  if (count < 1000) throw new Error(`Oväntat få Majestic-domäner: ${count}`);
   log(`  Majestic: ${count.toLocaleString('sv-SE')} relevanta domäner`);
   return map;
 }

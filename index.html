@@ -60,7 +60,8 @@
               <button type="button" data-view="karens" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner i karens som frisläpps framöver">I karens</button>
               <button type="button" data-view="released" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner som frisläppts de senaste 90 dagarna">🆕 Nysläppta</button>
               <button type="button" data-view="upcoming" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade domäner som frisläpps inom nästa dygn">💎 Nästa 24 h</button>
-              <button type="button" data-view="free" class="view-pill px-3 py-1.5" title="Högst rankade domäner som bekräftats lediga">✨ Lediga nu</button>
+              <button type="button" data-view="free" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade nyligen frisläppta domäner som bekräftats lediga">✨ Lediga nu</button>
+              <button type="button" data-view="ranked" class="view-pill px-3 py-1.5" title="Lediga .se- och .nu-domäner från Tranco, Majestic Million eller Open PageRank Top 10M">🏆 Äldre guldkorn</button>
             </div>
 
             <!-- TLD-pills -->
@@ -127,6 +128,22 @@
                     <label for="f-score-risk-min" title="Lägre är bättre">Risk ↓</label>
                     <input id="f-score-risk-min" aria-label="Minsta riskpoäng" type="number" min="0" max="100" placeholder="0" class="score-filter" />
                     <input id="f-score-risk-max" aria-label="Högsta riskpoäng" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                  </div>
+                </div>
+                <div class="pb-2 mb-2 border-b border-slate-200 dark:border-slate-700">
+                  <div class="grid grid-cols-[1fr_80px_80px] gap-2 items-center text-xs">
+                    <span class="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Ranking</span>
+                    <span class="text-center text-slate-400">Min</span>
+                    <span class="text-center text-slate-400">Max</span>
+                    <label for="f-tranco-rank-min">Tranco</label>
+                    <input id="f-tranco-rank-min" aria-label="Bästa lägsta Tranco-rank" type="number" min="1" max="1000000" placeholder="1" class="score-filter" />
+                    <input id="f-tranco-rank-max" aria-label="Högsta Tranco-rank" type="number" min="1" max="1000000" placeholder="1 000 000" class="score-filter" />
+                    <label for="f-majestic-rank-min">Majestic</label>
+                    <input id="f-majestic-rank-min" aria-label="Bästa lägsta Majestic-rank" type="number" min="1" max="1000000" placeholder="1" class="score-filter" />
+                    <input id="f-majestic-rank-max" aria-label="Högsta Majestic-rank" type="number" min="1" max="1000000" placeholder="1 000 000" class="score-filter" />
+                    <label for="f-opr-rank-min">Open PageRank</label>
+                    <input id="f-opr-rank-min" aria-label="Bästa lägsta Open PageRank-rank" type="number" min="1" max="10000000" placeholder="1" class="score-filter" />
+                    <input id="f-opr-rank-max" aria-label="Högsta Open PageRank-rank" type="number" min="1" max="10000000" placeholder="10 000 000" class="score-filter" />
                   </div>
                 </div>
                 <label class="flex items-center gap-1.5"><input id="f-word" type="checkbox" class="rounded" /> 📖 Är ett svenskt ord</label>
@@ -200,6 +217,9 @@
               <button type="button" data-sort="score_authority" class="th-sort justify-center" title="SEO- och historikpoäng">SEO <span class="sort-ind"></span></button>
               <button type="button" data-sort="score_demand" class="th-sort justify-center" title="Indikativ efterfrågan">Efterfr. <span class="sort-ind"></span></button>
               <button type="button" data-sort="score_risk" class="th-sort justify-center" title="Riskpoäng, lägre är bättre">Risk <span class="sort-ind"></span></button>
+              <button type="button" data-sort="majestic_rank" class="th-sort justify-end" title="Majestic Million-rank, lägre är bättre">Majestic <span class="sort-ind"></span></button>
+              <button type="button" data-sort="opr_rank" class="th-sort justify-end" title="Open PageRank Top 10M, lägre är bättre">OPR <span class="sort-ind"></span></button>
+              <button type="button" data-sort="tranco_rank" class="th-sort justify-end" title="Tranco Top 1M, lägre är bättre">Tranco <span class="sort-ind"></span></button>
               <div class="text-left">Signaler</div>
               <button type="button" data-sort="length" class="th-sort text-left">Len <span class="sort-ind"></span></button>
               <button type="button" data-sort="release_at" class="th-sort text-left">Frisläpps <span class="sort-ind"></span></button>
@@ -288,7 +308,7 @@
               <li>🔗 Backlinks (Majestic)</li>
               <li>⏳ Wayback-snapshots</li>
               <li>📡 Aktiva DNS-records</li>
-              <li>💎 Total · V varumärke · S SEO · E efterfrågan · R risk</li>
+              <li>Poäng och rankingar visas i egna sorterbara kolumner.</li>
               <li>↔ Palindrom · 🗣 Uttalbart</li>
             </ul>
           </div>
@@ -297,6 +317,8 @@
             <ul class="space-y-1 text-xs">
               <li><strong>Nästa 24 h</strong> rankar kommande frisläppningar efter totalpoäng.</li>
               <li><strong>Lediga nu</strong> visar endast domäner som Internetstiftelsens DAS bekräftat som lediga.</li>
+              <li><strong>Äldre guldkorn</strong> visar DAS-bekräftat lediga domäner som finns i Tranco, Majestic Million eller Open PageRank Top 10M.</li>
+              <li>”Sedd ledig” räknas från första gången denna tjänst upptäckte ledigheten.</li>
               <li>Efterfrågan är en indikativ poäng från ord-, popularitets- och länksignaler.</li>
               <li>Risk är teknisk/namnbaserad och ersätter inte en varumärkeskontroll.</li>
             </ul>
@@ -310,6 +332,7 @@
             <a class="underline" href="https://internetstiftelsen.se/" target="_blank" rel="noopener">Internetstiftelsen</a> ·
             <a class="underline" href="https://tranco-list.eu/" target="_blank" rel="noopener">Tranco</a> ·
             <a class="underline" href="https://majestic.com/reports/majestic-million" target="_blank" rel="noopener">Majestic Million</a> ·
+            <a class="underline" href="https://www.domcop.com/openpagerank/" target="_blank" rel="noopener">Open PageRank</a> ·
             <a class="underline" href="https://web.archive.org/" target="_blank" rel="noopener">Wayback</a>
           </span>
           <span>All bearbetning sker lokalt i din webbläsare.</span>

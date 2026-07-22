@@ -53,6 +53,9 @@ jobs:
             echo "WAYBACK_MAX=0" >> "$GITHUB_ENV"
             echo "DNS_MAX=1000" >> "$GITHUB_ENV"
           fi
+          # Hård gräns: första backfillen blir klar på cirka tio timkörningar.
+          # Därefter återstår normalt bara nya och förfallna återkontroller.
+          echo "RANKED_AVAIL_MAX=5000" >> "$GITHUB_ENV"
 
       - name: Fetch data and build SQLite
         run: npm run build:data

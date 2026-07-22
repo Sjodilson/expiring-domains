@@ -69,6 +69,37 @@ export class EnrichmentCache {
     this.ensureColumn('karens', 'avail_attempted_at', 'TEXT');
     this.ensureColumn('karens', 'avail_status', 'TEXT');
     this.ensureColumn('karens', 'avail_error', 'TEXT');
+
+    // Alla .se/.nu-domäner som förekommer i minst en rankningskälla. Tabellen
+    // är separat från karenshistoriken eftersom äldre lediga domäner saknar ett
+    // känt frisläppningsdatum.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ranked_candidates (
+        domain                  TEXT PRIMARY KEY,
+        tld                     TEXT NOT NULL,
+        first_seen_at           TEXT NOT NULL,
+        last_seen_at            TEXT NOT NULL,
+        active                  INTEGER NOT NULL DEFAULT 1,
+        missing_runs            INTEGER NOT NULL DEFAULT 0,
+        in_tranco               INTEGER NOT NULL DEFAULT 0,
+        tranco_rank             INTEGER,
+        in_majestic             INTEGER NOT NULL DEFAULT 0,
+        majestic_rank           INTEGER,
+        majestic_refsubnets     INTEGER,
+        in_opr                  INTEGER NOT NULL DEFAULT 0,
+        opr_rank                INTEGER,
+        opr_score               REAL,
+        taken                   INTEGER,
+        first_free_at           TEXT,
+        avail_checked_at        TEXT,
+        avail_attempted_at      TEXT,
+        avail_status            TEXT,
+        avail_error             TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ranked_active ON ranked_candidates(active);
+      CREATE INDEX IF NOT EXISTS idx_ranked_avail ON ranked_candidates(active, avail_status, avail_checked_at);
+      CREATE INDEX IF NOT EXISTS idx_ranked_free ON ranked_candidates(active, first_free_at) WHERE avail_status = 'free';
+    `);
     this.upsertKarensStmt = this.db.prepare(`
       INSERT INTO karens (domain, tld, release_at) VALUES (?, ?, ?)
       ON CONFLICT(domain) DO UPDATE SET tld = excluded.tld, release_at = excluded.release_at
@@ -85,6 +116,23 @@ export class EnrichmentCache {
     `);
     this.setAvailErrorStmt = this.db.prepare(`
       UPDATE karens SET
+        avail_attempted_at = ?,
+        avail_status = 'error',
+        avail_error = ?
+      WHERE domain = ?
+    `);
+    this.setRankedAvailStmt = this.db.prepare(`
+      UPDATE ranked_candidates SET
+        taken = ?,
+        first_free_at = CASE WHEN ? = 0 AND first_free_at IS NULL THEN ? ELSE first_free_at END,
+        avail_checked_at = ?,
+        avail_attempted_at = ?,
+        avail_status = ?,
+        avail_error = NULL
+      WHERE domain = ?
+    `);
+    this.setRankedAvailErrorStmt = this.db.prepare(`
+      UPDATE ranked_candidates SET
         avail_attempted_at = ?,
         avail_status = 'error',
         avail_error = ?
@@ -190,6 +238,185 @@ export class EnrichmentCache {
       for (const r of items) this.upsertKarensStmt.run(r.name, r.tld, r.release_at);
     });
     tx(rows);
+  }
+
+  // Synka den aktuella unionen av Tranco, Majestic och Open PageRank. En källa
+  // nollställs bara när den faktiskt laddats, så ett tillfälligt källfel kan
+  // aldrig avregistrera kandidater. Tre lyckade frånvarokörningar krävs innan
+  // en domän markeras inaktiv.
+  recordRankedCandidates({ tranco, majestic, opr }) {
+    const sources = [];
+    if (tranco instanceof Map && tranco.size > 0) sources.push('tranco');
+    if (majestic instanceof Map && majestic.size > 0) sources.push('majestic');
+    if (opr instanceof Map && opr.size > 0) sources.push('opr');
+    if (sources.length === 0) {
+      return { sourcesUpdated: [], newCandidates: 0, active: this.getRankedStats().active };
+    }
+
+    const before = this.db.prepare('SELECT COUNT(*) AS c FROM ranked_candidates').get().c;
+    const now = new Date().toISOString();
+    const upsertTranco = this.db.prepare(`
+      INSERT INTO ranked_candidates (
+        domain, tld, first_seen_at, last_seen_at, active, in_tranco, tranco_rank
+      ) VALUES (?, ?, ?, ?, 1, 1, ?)
+      ON CONFLICT(domain) DO UPDATE SET
+        tld = excluded.tld,
+        last_seen_at = excluded.last_seen_at,
+        active = 1,
+        in_tranco = 1,
+        tranco_rank = excluded.tranco_rank
+    `);
+    const upsertMajestic = this.db.prepare(`
+      INSERT INTO ranked_candidates (
+        domain, tld, first_seen_at, last_seen_at, active,
+        in_majestic, majestic_rank, majestic_refsubnets
+      ) VALUES (?, ?, ?, ?, 1, 1, ?, ?)
+      ON CONFLICT(domain) DO UPDATE SET
+        tld = excluded.tld,
+        last_seen_at = excluded.last_seen_at,
+        active = 1,
+        in_majestic = 1,
+        majestic_rank = excluded.majestic_rank,
+        majestic_refsubnets = excluded.majestic_refsubnets
+    `);
+    const upsertOpr = this.db.prepare(`
+      INSERT INTO ranked_candidates (
+        domain, tld, first_seen_at, last_seen_at, active, in_opr, opr_rank, opr_score
+      ) VALUES (?, ?, ?, ?, 1, 1, ?, ?)
+      ON CONFLICT(domain) DO UPDATE SET
+        tld = excluded.tld,
+        last_seen_at = excluded.last_seen_at,
+        active = 1,
+        in_opr = 1,
+        opr_rank = excluded.opr_rank,
+        opr_score = excluded.opr_score
+    `);
+    const tldOf = (domain) => domain.endsWith('.nu') ? 'nu' : 'se';
+
+    const tx = this.db.transaction(() => {
+      if (sources.includes('tranco')) {
+        this.db.exec('UPDATE ranked_candidates SET in_tranco = 0, tranco_rank = NULL');
+        for (const [domain, rank] of tranco) {
+          upsertTranco.run(domain, tldOf(domain), now, now, rank);
+        }
+      }
+      if (sources.includes('majestic')) {
+        this.db.exec('UPDATE ranked_candidates SET in_majestic = 0, majestic_rank = NULL, majestic_refsubnets = NULL');
+        for (const [domain, data] of majestic) {
+          upsertMajestic.run(domain, tldOf(domain), now, now, data.rank, data.refSubNets ?? 0);
+        }
+      }
+      if (sources.includes('opr')) {
+        this.db.exec('UPDATE ranked_candidates SET in_opr = 0, opr_rank = NULL, opr_score = NULL');
+        for (const [domain, data] of opr) {
+          upsertOpr.run(domain, tldOf(domain), now, now, data.rank, data.score);
+        }
+      }
+
+      this.db.prepare(`
+        UPDATE ranked_candidates SET
+          active = CASE
+            WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1 THEN 1
+            WHEN missing_runs + 1 >= 3 THEN 0
+            ELSE active
+          END,
+          missing_runs = CASE
+            WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1 THEN 0
+            ELSE missing_runs + 1
+          END
+      `).run();
+    });
+    tx();
+
+    const after = this.db.prepare('SELECT COUNT(*) AS c FROM ranked_candidates').get().c;
+    return {
+      sourcesUpdated: sources,
+      newCandidates: Math.max(0, after - before),
+      active: this.getRankedStats().active
+    };
+  }
+
+  getRankedDue(limit, { errorHours = 6, freeHours = 23, occupiedDays = 30 } = {}) {
+    if (!Number.isFinite(limit) || limit <= 0) return [];
+    const cutoff = (hours) => new Date(Date.now() - hours * 3600000).toISOString();
+    return this.db.prepare(`
+      SELECT * FROM ranked_candidates
+      WHERE active = 1 AND (
+        avail_status IS NULL
+        OR (avail_status = 'error' AND (avail_attempted_at IS NULL OR avail_attempted_at < ?))
+        OR (avail_status = 'free' AND (avail_checked_at IS NULL OR avail_checked_at < ?))
+        OR (avail_status = 'occupied' AND (avail_checked_at IS NULL OR avail_checked_at < ?))
+      )
+      ORDER BY
+        CASE WHEN avail_status IS NULL THEN 0 WHEN avail_status = 'error' THEN 1 WHEN avail_status = 'free' THEN 2 ELSE 3 END,
+        CASE WHEN avail_status IS NULL THEN first_seen_at END DESC,
+        CASE WHEN tranco_rank IS NULL THEN 1 ELSE 0 END, tranco_rank ASC,
+        CASE WHEN majestic_rank IS NULL THEN 1 ELSE 0 END, majestic_rank ASC,
+        CASE WHEN opr_rank IS NULL THEN 1 ELSE 0 END, opr_rank ASC,
+        domain ASC
+      LIMIT ?
+    `).all(cutoff(errorHours), cutoff(freeHours), cutoff(occupiedDays * 24), Math.floor(limit));
+  }
+
+  setRankedAvailability(domain, taken) {
+    const now = new Date().toISOString();
+    this.setRankedAvailStmt.run(
+      taken ? 1 : 0,
+      taken ? 1 : 0,
+      now,
+      now,
+      now,
+      taken ? 'occupied' : 'free',
+      domain
+    );
+  }
+
+  setRankedAvailabilityError(domain, error) {
+    this.setRankedAvailErrorStmt.run(new Date().toISOString(), error, domain);
+  }
+
+  syncRankedAvailabilityFromKarens() {
+    return this.db.prepare(`
+      UPDATE ranked_candidates AS r SET
+        taken = (SELECT k.taken FROM karens k WHERE k.domain = r.domain),
+        first_free_at = CASE
+          WHEN first_free_at IS NULL AND (SELECT k.avail_status FROM karens k WHERE k.domain = r.domain) = 'free'
+          THEN (SELECT k.avail_checked_at FROM karens k WHERE k.domain = r.domain)
+          ELSE first_free_at
+        END,
+        avail_checked_at = (SELECT k.avail_checked_at FROM karens k WHERE k.domain = r.domain),
+        avail_attempted_at = (SELECT k.avail_attempted_at FROM karens k WHERE k.domain = r.domain),
+        avail_status = (SELECT k.avail_status FROM karens k WHERE k.domain = r.domain),
+        avail_error = (SELECT k.avail_error FROM karens k WHERE k.domain = r.domain)
+      WHERE EXISTS (
+        SELECT 1 FROM karens k
+        WHERE k.domain = r.domain
+          AND k.avail_status IN ('free', 'occupied')
+          AND k.avail_checked_at IS NOT NULL
+          AND (r.avail_checked_at IS NULL OR k.avail_checked_at > r.avail_checked_at)
+      )
+    `).run().changes;
+  }
+
+  getRankedFree() {
+    return this.db.prepare(`
+      SELECT * FROM ranked_candidates
+      WHERE active = 1 AND avail_status = 'free'
+      ORDER BY first_free_at ASC, domain ASC
+    `).all();
+  }
+
+  getRankedStats() {
+    return this.db.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END), 0) AS active,
+        COALESCE(SUM(CASE WHEN active = 1 AND avail_status = 'free' THEN 1 ELSE 0 END), 0) AS free,
+        COALESCE(SUM(CASE WHEN active = 1 AND avail_status = 'occupied' THEN 1 ELSE 0 END), 0) AS occupied,
+        COALESCE(SUM(CASE WHEN active = 1 AND avail_status = 'error' THEN 1 ELSE 0 END), 0) AS errors,
+        COALESCE(SUM(CASE WHEN active = 1 AND avail_status IS NULL THEN 1 ELSE 0 END), 0) AS unchecked
+      FROM ranked_candidates
+    `).get();
   }
 
   // Domäner vars release-datum passerat, nyaste först

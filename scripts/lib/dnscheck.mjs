@@ -150,6 +150,37 @@ export async function checkAvailability(released, cache, { log }) {
   return { checked: todo.length, taken, free, errors, dnsRepaired: dnsRepair.length };
 }
 
+// Äldre guldkorn kommer direkt från rankningslistorna och saknar normalt ett
+// känt frisläppningsdatum. Cachen väljer vilka kandidater som är förfallna för
+// kontroll; här utförs endast den budgeterade DAS-batchen.
+export async function checkRankedAvailability(candidates, cache, { log }) {
+  if (candidates.length === 0) return { checked: 0, occupied: 0, free: 0, errors: 0 };
+
+  let occupied = 0;
+  let free = 0;
+  let errors = 0;
+  log(`  Rankade kandidater (DAS): kollar ${candidates.length.toLocaleString('sv-SE')} domäner`);
+  await runDasBatches(
+    candidates,
+    async (row) => {
+      const result = await checkDas(row.domain);
+      if (result.error) {
+        errors++;
+        cache.setRankedAvailabilityError(row.domain, result.error);
+        return;
+      }
+      cache.setRankedAvailability(row.domain, result.taken);
+      if (result.taken) occupied++;
+      else free++;
+    },
+    (done, total) => {
+      if (done % 250 === 0 || done === total) log(`    Rankad DAS: ${done}/${total}`);
+    }
+  );
+  log(`  Rankad tillgänglighet: ${occupied} upptagna, ${free} lediga, ${errors} kontrollfel`);
+  return { checked: candidates.length, occupied, free, errors };
+}
+
 export async function enrichDns(domains, cache, { maxPerRun, log }) {
   if (domains.length === 0) return { processed: 0 };
   const todo = domains.slice(0, maxPerRun);

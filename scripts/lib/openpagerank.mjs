@@ -38,6 +38,7 @@ export async function loadOpenPageRankMap(log) {
       }
     }
   }
+  if (count < 10000) throw new Error(`Oväntat få Open PageRank-domäner: ${count}`);
   log(`  Open PageRank: ${count.toLocaleString('sv-SE')} relevanta domäner`);
   return map;
 }

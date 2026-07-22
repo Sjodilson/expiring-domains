@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
 import { fetchJson, fetchText, fetchBuffer } from './lib/util.mjs';
 import { EnrichmentCache } from './lib/cache.mjs';
 import { enrichWayback } from './lib/wayback.mjs';
-import { enrichDns, checkAvailability } from './lib/dnscheck.mjs';
+import { enrichDns, checkAvailability, checkRankedAvailability } from './lib/dnscheck.mjs';
 import { loadMajesticMap } from './lib/backlinks.mjs';
 import { loadOpenPageRankMap } from './lib/openpagerank.mjs';
 import { loadCcDomainMap } from './lib/commoncrawl.mjs';
@@ -21,7 +21,7 @@ const PUBLIC_DIR = join(ROOT, 'public');
 const CACHE_DIR = join(ROOT, 'cache');
 const DB_PATH = join(PUBLIC_DIR, 'domains.sqlite');
 const META_PATH = join(PUBLIC_DIR, 'meta.json');
-const CACHE_DB = join(CACHE_DIR, 'enrichment.sqlite');
+const CACHE_DB = process.env.CACHE_DB || join(CACHE_DIR, 'enrichment.sqlite');
 
 const SOURCES = [
   { tld: 'se', url: 'https://data.internetstiftelsen.se/bardate_domains.json' },
@@ -42,6 +42,11 @@ const DNS_MAX_PER_RUN = parseInt(process.env.DNS_MAX || '8000', 10);
 const DNS_REFRESH_DAYS = parseInt(process.env.DNS_REFRESH_DAYS || '14', 10);
 // Hur många dagar bakåt nysläppta domäner visas med tillgänglighetsstatus
 const RELEASED_DAYS = parseInt(process.env.RELEASED_DAYS || '90', 10);
+// Rankade kandidater betas av snabbt första dygnet, därefter är endast nya och
+// förfallna återkontroller normalt aktuella.
+const RANKED_AVAIL_MAX_PER_RUN = parseInt(process.env.RANKED_AVAIL_MAX || '5000', 10);
+const RANKED_FREE_REFRESH_HOURS = parseInt(process.env.RANKED_FREE_REFRESH_HOURS || '23', 10);
+const RANKED_OCCUPIED_REFRESH_DAYS = parseInt(process.env.RANKED_OCCUPIED_REFRESH_DAYS || '30', 10);
 
 const VOWELS = new Set(['a', 'e', 'i', 'o', 'u', 'y', 'å', 'ä', 'ö']);
 
@@ -97,6 +102,7 @@ async function loadTrancoMap() {
         count++;
       }
     }
+    if (count < 1000) throw new Error(`Oväntat få Tranco-domäner: ${count}`);
     log(`  Tranco: ${count.toLocaleString('sv-SE')} relevanta domäner`);
     return map;
   } catch (err) {
@@ -286,7 +292,12 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       taken_at          TEXT,
       avail_checked_at  TEXT,
       availability_status TEXT,
-      availability_error TEXT
+      availability_error TEXT,
+      in_release_feed   INTEGER NOT NULL DEFAULT 1,
+      ranked_candidate  INTEGER NOT NULL DEFAULT 0,
+      ranking_first_seen_at TEXT,
+      ranking_last_seen_at TEXT,
+      first_free_at     TEXT
     );
   `);
 
@@ -300,14 +311,27 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error,
       opr_rank, opr_score, cc_hosts,
       score_brand, score_authority, score_demand, score_risk, score_total,
-      released, taken, taken_at, avail_checked_at, availability_status, availability_error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      released, taken, taken_at, avail_checked_at, availability_status, availability_error,
+      in_release_feed, ranked_candidate, ranking_first_seen_at, ranking_last_seen_at, first_free_at
+    ) VALUES (
+      @name, @base, @tld, @release_at, @length,
+      @has_digit, @has_hyphen, @only_digits, @only_letters,
+      @is_palindrome, @has_repeat, @is_cvcv, @is_word,
+      @tranco_rank, @majestic_rank, @majestic_refsubnets,
+      @wayback_first, @wayback_count, @wayback_checked,
+      @dns_a, @dns_mx, @dns_ns, @dns_checked, @dns_status, @dns_error,
+      @opr_rank, @opr_score, @cc_hosts,
+      @score_brand, @score_authority, @score_demand, @score_risk, @score_total,
+      @released, @taken, @taken_at, @avail_checked_at, @availability_status, @availability_error,
+      @in_release_feed, @ranked_candidate, @ranking_first_seen_at, @ranking_last_seen_at, @first_free_at
+    )
   `);
 
   const stats = {
     word: 0, tranco: 0, majestic: 0, opr: 0, cc: 0,
     waybackChecked: 0, waybackHits: 0,
-    dnsChecked: 0, dnsAny: 0, dnsErrors: 0
+    dnsChecked: 0, dnsAny: 0, dnsErrors: 0,
+    rankedFree: 0
   };
 
   const tx = db.transaction((items) => {
@@ -318,9 +342,13 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       const tld = dot === -1 ? '' : name.slice(dot + 1);
 
       const word = words && words.has(base) ? 1 : 0;
-      const trancoRank = tranco ? tranco.get(name) ?? null : null;
-      const maj = majestic ? majestic.get(name) ?? null : null;
-      const oprData = opr ? opr.get(name) ?? null : null;
+      const trancoRank = r.tranco_rank ?? (tranco ? tranco.get(name) ?? null : null);
+      const maj = r.majestic_rank != null
+        ? { rank: r.majestic_rank, refSubNets: r.majestic_refsubnets ?? 0 }
+        : (majestic ? majestic.get(name) ?? null : null);
+      const oprData = r.opr_rank != null
+        ? { rank: r.opr_rank, score: r.opr_score ?? 0 }
+        : (opr ? opr.get(name) ?? null : null);
       const ccHosts = cc ? cc.get(name) ?? null : null;
       const cache = cacheRows.get(name);
 
@@ -352,28 +380,54 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         if (dnsA || dnsMx || dnsNs) stats.dnsAny++;
       }
       if (dnsStatus === 'error') stats.dnsErrors++;
+      if (r.ranked_candidate) stats.rankedFree++;
 
-      insert.run(
-        name, base, tld, r.release_at, base.length,
-        /\d/.test(base) ? 1 : 0,
-        base.includes('-') ? 1 : 0,
-        /^\d+$/.test(base) ? 1 : 0,
-        /^[a-zåäö]+$/.test(base) ? 1 : 0,
-        isPalindrome(base) ? 1 : 0,
-        hasRepeatedChar(base) ? 1 : 0,
-        isCvcv(base) ? 1 : 0,
-        word,
-        trancoRank,
-        maj?.rank ?? null,
-        maj?.refSubNets ?? null,
-        wbFirst, wbCount, wbChecked,
-        dnsA, dnsMx, dnsNs, dnsChecked, dnsStatus, dnsError,
-        oprData?.rank ?? null, oprData?.score ?? null,
-        ccHosts,
-        scores.brand, scores.authority, scores.demand, scores.risk, scores.total,
-        r.released ?? 0, r.taken ?? null, r.taken_at ?? null, r.avail_checked_at ?? null,
-        r.avail_status ?? null, r.avail_error ?? null
-      );
+      insert.run({
+        name,
+        base,
+        tld,
+        release_at: r.release_at,
+        length: base.length,
+        has_digit: /\d/.test(base) ? 1 : 0,
+        has_hyphen: base.includes('-') ? 1 : 0,
+        only_digits: /^\d+$/.test(base) ? 1 : 0,
+        only_letters: /^[a-zåäö]+$/.test(base) ? 1 : 0,
+        is_palindrome: isPalindrome(base) ? 1 : 0,
+        has_repeat: hasRepeatedChar(base) ? 1 : 0,
+        is_cvcv: isCvcv(base) ? 1 : 0,
+        is_word: word,
+        tranco_rank: trancoRank,
+        majestic_rank: maj?.rank ?? null,
+        majestic_refsubnets: maj?.refSubNets ?? null,
+        wayback_first: wbFirst,
+        wayback_count: wbCount,
+        wayback_checked: wbChecked,
+        dns_a: dnsA,
+        dns_mx: dnsMx,
+        dns_ns: dnsNs,
+        dns_checked: dnsChecked,
+        dns_status: dnsStatus,
+        dns_error: dnsError,
+        opr_rank: oprData?.rank ?? null,
+        opr_score: oprData?.score ?? null,
+        cc_hosts: ccHosts,
+        score_brand: scores.brand,
+        score_authority: scores.authority,
+        score_demand: scores.demand,
+        score_risk: scores.risk,
+        score_total: scores.total,
+        released: r.released ?? 0,
+        taken: r.taken ?? null,
+        taken_at: r.taken_at ?? null,
+        avail_checked_at: r.avail_checked_at ?? null,
+        availability_status: r.avail_status ?? null,
+        availability_error: r.avail_error ?? null,
+        in_release_feed: r.in_release_feed ?? 1,
+        ranked_candidate: r.ranked_candidate ?? 0,
+        ranking_first_seen_at: r.ranking_first_seen_at ?? null,
+        ranking_last_seen_at: r.ranking_last_seen_at ?? null,
+        first_free_at: r.first_free_at ?? null
+      });
     }
   });
 
@@ -395,6 +449,9 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
     CREATE INDEX idx_opr ON domains(opr_rank);
     CREATE INDEX idx_cc ON domains(cc_hosts);
     CREATE INDEX idx_released ON domains(released, release_at);
+    CREATE INDEX idx_release_feed ON domains(in_release_feed, released, release_at);
+    CREATE INDEX idx_ranked_free ON domains(ranked_candidate, availability_status, score_total);
+    CREATE INDEX idx_ranked_first_free ON domains(first_free_at);
   `);
 
   db.exec('VACUUM;');
@@ -491,6 +548,9 @@ async function main() {
 
   const cache = new EnrichmentCache(CACHE_DB);
 
+  const rankedSync = cache.recordRankedCandidates({ tranco, majestic, opr });
+  log(`  Rankningskandidater: ${rankedSync.active.toLocaleString('sv-SE')} aktiva · ${rankedSync.newCandidates.toLocaleString('sv-SE')} nya · källor ${rankedSync.sourcesUpdated.join(', ') || 'inga'}`);
+
   // Nysläppta: anteckna dagens karensdata, kolla om frisläppta domäner tagits
   cache.recordKarens(all);
   cache.pruneKarens(releasedFrom);
@@ -510,8 +570,26 @@ async function main() {
     avail_error: r.avail_error
   }));
   const releasedNames = releasedRows.map((r) => r.name);
+  const rankedSyncedFromKarens = cache.syncRankedAvailabilityFromKarens();
+  if (rankedSyncedFromKarens) log(`  Rankningskö: återanvände ${rankedSyncedFromKarens.toLocaleString('sv-SE')} färska karenskontroller`);
 
-  const pruned = cache.prune(new Set([...allDomains, ...releasedNames]));
+  let rankedCheck = { checked: 0, occupied: 0, free: 0, errors: 0 };
+  if (process.env.SKIP_RANKED_AVAIL !== '1' && RANKED_AVAIL_MAX_PER_RUN > 0) {
+    const rankedDue = cache.getRankedDue(RANKED_AVAIL_MAX_PER_RUN, {
+      freeHours: RANKED_FREE_REFRESH_HOURS,
+      occupiedDays: RANKED_OCCUPIED_REFRESH_DAYS
+    });
+    rankedCheck = await checkRankedAvailability(rankedDue, cache, { log });
+  } else if (process.env.SKIP_RANKED_AVAIL === '1') {
+    warn('SKIP_RANKED_AVAIL=1');
+  }
+
+  const rankedFree = cache.getRankedFree();
+  const rankedFreeNames = rankedFree.map((r) => r.domain);
+  const rankedStats = cache.getRankedStats();
+  log(`  Äldre guldkorn: ${rankedStats.free.toLocaleString('sv-SE')} lediga · ${rankedStats.occupied.toLocaleString('sv-SE')} upptagna · ${rankedStats.unchecked.toLocaleString('sv-SE')} väntar`);
+
+  const pruned = cache.prune(new Set([...allDomains, ...releasedNames, ...rankedFreeNames]));
   if (pruned > 0) log(`  Cache: rensade ${pruned} gamla rader`);
 
   if (process.env.SKIP_DNS !== '1') {
@@ -521,21 +599,70 @@ async function main() {
   } else { warn('SKIP_DNS=1'); }
 
   if (process.env.SKIP_WAYBACK !== '1') {
-    const need = sortByRelease(cache.needsUpdate('wayback', allDomains, WAYBACK_REFRESH_DAYS));
+    const waybackDomains = [...new Set([...rankedFreeNames, ...allDomains])];
+    const need = sortByRelease(cache.needsUpdate('wayback', waybackDomains, WAYBACK_REFRESH_DAYS));
     if (need.length) log(`  Wayback-batch täcker frisläpp ${batchSpan(need, WAYBACK_MAX_PER_RUN)}`);
     await enrichWayback(need, cache, { maxPerRun: WAYBACK_MAX_PER_RUN, log });
   } else { warn('SKIP_WAYBACK=1'); }
 
   // 4. Hämta cachade berikningar för alla aktuella domäner
-  const cacheRows = cache.getMany([...allDomains, ...releasedNames]);
+  const cacheRows = cache.getMany([...allDomains, ...releasedNames, ...rankedFreeNames]);
   cache.close();
 
-  // 5. Bygg sqlite — karensdomäner + nysläppta i samma tabell
-  const dbRows = [
-    ...releasedRows,
-    ...future.map((r) => ({ ...r, released: 0, taken: null, taken_at: null, avail_checked_at: null }))
-  ];
-  log(`→ Bygger SQLite med ${dbRows.length.toLocaleString('sv-SE')} rader (${releasedRows.length} nysläppta)`);
+  // 5. Bygg sqlite. Rankade lediga domäner slås ihop med karensrader när de
+  // överlappar; äldre kandidater får första observerade ledighetsdatum som
+  // internt listdatum men hålls utanför de vanliga frisläppningsvyerna.
+  const dbRowMap = new Map();
+  for (const row of releasedRows) dbRowMap.set(row.name, { ...row, in_release_feed: 1 });
+  for (const row of future) {
+    dbRowMap.set(row.name, {
+      ...row,
+      released: 0,
+      taken: null,
+      taken_at: null,
+      avail_checked_at: null,
+      in_release_feed: 1
+    });
+  }
+  for (const ranked of rankedFree) {
+    const existing = dbRowMap.get(ranked.domain);
+    const rankedFields = {
+      ranked_candidate: 1,
+      ranking_first_seen_at: ranked.first_seen_at,
+      ranking_last_seen_at: ranked.last_seen_at,
+      first_free_at: ranked.first_free_at,
+      tranco_rank: ranked.tranco_rank,
+      majestic_rank: ranked.majestic_rank,
+      majestic_refsubnets: ranked.majestic_refsubnets,
+      opr_rank: ranked.opr_rank,
+      opr_score: ranked.opr_score
+    };
+    if (existing) {
+      Object.assign(existing, rankedFields);
+      if (!existing.avail_checked_at || (ranked.avail_checked_at && ranked.avail_checked_at > existing.avail_checked_at)) {
+        existing.taken = ranked.taken;
+        existing.avail_checked_at = ranked.avail_checked_at;
+        existing.avail_status = ranked.avail_status;
+        existing.avail_error = ranked.avail_error;
+      }
+    } else {
+      dbRowMap.set(ranked.domain, {
+        name: ranked.domain,
+        tld: ranked.tld,
+        release_at: (ranked.first_free_at || todayStr).slice(0, 10),
+        released: 1,
+        taken: 0,
+        taken_at: null,
+        avail_checked_at: ranked.avail_checked_at,
+        avail_status: ranked.avail_status,
+        avail_error: ranked.avail_error,
+        in_release_feed: 0,
+        ...rankedFields
+      });
+    }
+  }
+  const dbRows = [...dbRowMap.values()];
+  log(`→ Bygger SQLite med ${dbRows.length.toLocaleString('sv-SE')} rader (${releasedRows.length} nysläppta · ${rankedFree.length} rankade lediga)`);
   const stats = buildDatabase(dbRows, words, tranco, majestic, opr, cc, cacheRows);
 
   log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}, opr=${stats.opr}, cc=${stats.cc}`);
@@ -551,10 +678,24 @@ async function main() {
     errors: releasedRows.filter((r) => r.avail_status === 'error').length,
     unchecked: releasedRows.filter((r) => r.avail_status == null).length
   };
+  meta.ranked = {
+    candidates: rankedStats.active,
+    free: rankedStats.free,
+    occupied: rankedStats.occupied,
+    errors: rankedStats.errors,
+    unchecked: rankedStats.unchecked,
+    new_this_run: rankedSync.newCandidates,
+    checked_this_run: rankedCheck.checked,
+    sources_updated: rankedSync.sourcesUpdated,
+    date_range: {
+      min: rankedFree.length ? rankedFree[0].first_free_at.slice(0, 10) : null,
+      max: rankedFree.length ? rankedFree[rankedFree.length - 1].first_free_at.slice(0, 10) : null
+    }
+  };
   writeFileSync(META_PATH, JSON.stringify(meta, null, 2), 'utf8');
 
   const sizeMB = (statSync(DB_PATH).size / 1024 / 1024).toFixed(2);
-  log(`✓ Klar. domains.sqlite = ${sizeMB} MB, ${all.length} rader`);
+  log(`✓ Klar. domains.sqlite = ${sizeMB} MB, ${dbRows.length} rader`);
 }
 
 main().catch((err) => {

@@ -133,11 +133,11 @@ body {
 }
 #thead,
 #viewport {
-  min-width: 1120px;
+  min-width: 1240px;
 }
 #thead,
 #rows .row {
-  grid-template-columns: 28px 20px minmax(160px, 1fr) 62px 62px 68px 72px 58px minmax(150px, auto) 50px 110px 30px;
+  grid-template-columns: 28px 20px minmax(150px, 1fr) 62px 62px 68px 72px 58px 88px 88px 88px minmax(130px, auto) 50px 110px 30px;
 }
 #rows .row {
   display: grid;
@@ -278,6 +278,26 @@ body {
   display: flex;
   justify-content: center;
   min-width: 0;
+}
+.rank-cell {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(71 85 105);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dark .rank-cell {
+  color: rgb(148 163 184);
+}
+.rank-cell.hit {
+  color: rgb(30 64 175);
+  font-weight: 600;
+}
+.dark .rank-cell.hit {
+  color: rgb(147 197 253);
 }
 .score-filter {
   width: 100%;

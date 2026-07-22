@@ -14,6 +14,8 @@ webbläsaren via en SQLite-databas (sql.js) — inga uppgifter skickas vidare.
 - Nysläppta-vy: 90 dagars historik med registerstatus från Internetstiftelsens DAS
 - Guldkornspoäng för varumärke, SEO/historik, indikativ efterfrågan och risk
 - Topplistor för bästa domäner nästa 24 timmar och bästa bekräftat lediga nu
+- Äldre guldkorn: lediga .se/.nu från Tranco, Majestic Million eller Open PageRank Top 10M
+- Beständig rankningsbevakning som prioriterar nya kandidater och återkontrollerar lediga dagligen
 - Uppdateras varje timme via GitHub Actions (full berikning kl 05 UTC)
 
 ## Kör lokalt
@@ -39,7 +41,10 @@ timvisa körningarna uppdaterar nysläppta domäner och deras registerstatus via
 Internetstiftelsens Free/DAS. Upptagna domäners A-, MX- och NS-records sparas
 separat. DNS-timeout och SERVFAIL markeras som kontrollfel och cachas aldrig
 som "inga records". Den fulla berikningen (Wayback + stor DNS-batch) körs i
-05-körningen (UTC).
+05-körningen (UTC). Rankningskandidater kontrolleras i batchar om högst 5 000
+per körning. Nya och okontrollerade kandidater prioriteras, lediga kontrolleras
+ungefär dagligen och upptagna ungefär månadsvis. En kandidat inaktiveras först
+efter tre lyckade rankningskörningar där den saknas.
 
 Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 
@@ -47,6 +52,9 @@ Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 
 - https://data.internetstiftelsen.se/bardate_domains.json
 - https://data.internetstiftelsen.se/bardate_domains_nu.json
+- https://tranco-list.eu/
+- https://majestic.com/reports/majestic-million
+- https://www.domcop.com/openpagerank/
 
 Datan beskriver domäner i karenstid (perioden mellan utgångsdatum och
 frisläppsdatum). `release_at` är datumet då domänen blir tillgänglig att
@@ -65,5 +73,7 @@ index.html               ── statisk markup
 
 ## Kostnad
 
-Allt körs på gratisnivåer: GitHub Actions (~5 min/dag) + GitHub Pages eller
-Cloudflare Pages. Räkna med 0 kr/mån.
+Repot är publikt och använder standard-runners, vilket gör GitHub Actions och
+GitHub Pages kostnadsfria. Rankningskön har hårda batchgränser och den beständiga
+cachen ligger under GitHubs kostnadsfria 10 GB-gräns. Räkna med 0 kr/mån så
+länge repot förblir publikt och inga större betalrunners aktiveras.

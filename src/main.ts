@@ -32,6 +32,16 @@ interface Meta {
     coverage_wayback?: number;
     coverage_dns?: number;
   };
+  ranked?: {
+    candidates?: number;
+    free?: number;
+    occupied?: number;
+    errors?: number;
+    unchecked?: number;
+    new_this_run?: number;
+    checked_this_run?: number;
+    date_range?: { min: string | null; max: string | null };
+  };
 }
 
 interface Row {
@@ -74,11 +84,17 @@ interface Row {
   avail_checked_at: string | null;
   availability_status: string | null;
   availability_error: string | null;
+  in_release_feed: number;
+  ranked_candidate: number;
+  ranking_first_seen_at: string | null;
+  ranking_last_seen_at: string | null;
+  first_free_at: string | null;
 }
 
-type View = 'karens' | 'released' | 'upcoming' | 'free';
+type View = 'karens' | 'released' | 'upcoming' | 'free' | 'ranked';
 type SortKey = 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score' |
-  'score_total' | 'score_brand' | 'score_authority' | 'score_demand' | 'score_risk';
+  'score_total' | 'score_brand' | 'score_authority' | 'score_demand' | 'score_risk' |
+  'tranco_rank' | 'majestic_rank' | 'opr_rank';
 
 interface Filters {
   q: string;
@@ -117,6 +133,12 @@ interface Filters {
   maxScoreDemand: number | null;
   minScoreRisk: number | null;
   maxScoreRisk: number | null;
+  minTrancoRank: number | null;
+  maxTrancoRank: number | null;
+  minMajesticRank: number | null;
+  maxMajesticRank: number | null;
+  minOprRank: number | null;
+  maxOprRank: number | null;
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -130,7 +152,10 @@ const DEFAULT_FILTERS: Filters = {
   minScoreBrand: null, maxScoreBrand: null,
   minScoreAuthority: null, maxScoreAuthority: null,
   minScoreDemand: null, maxScoreDemand: null,
-  minScoreRisk: null, maxScoreRisk: null
+  minScoreRisk: null, maxScoreRisk: null,
+  minTrancoRank: null, maxTrancoRank: null,
+  minMajesticRank: null, maxMajesticRank: null,
+  minOprRank: null, maxOprRank: null
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -176,6 +201,12 @@ const els = {
   fScoreDemandMax: $<HTMLInputElement>('f-score-demand-max'),
   fScoreRiskMin: $<HTMLInputElement>('f-score-risk-min'),
   fScoreRiskMax: $<HTMLInputElement>('f-score-risk-max'),
+  fTrancoRankMin: $<HTMLInputElement>('f-tranco-rank-min'),
+  fTrancoRankMax: $<HTMLInputElement>('f-tranco-rank-max'),
+  fMajesticRankMin: $<HTMLInputElement>('f-majestic-rank-min'),
+  fMajesticRankMax: $<HTMLInputElement>('f-majestic-rank-max'),
+  fOprRankMin: $<HTMLInputElement>('f-opr-rank-min'),
+  fOprRankMax: $<HTMLInputElement>('f-opr-rank-max'),
   reset: $<HTMLButtonElement>('reset'),
   viewport: $('viewport'),
   spacer: $('spacer'),
@@ -326,7 +357,13 @@ function readFilters(): Filters {
     minScoreDemand: els.fScoreDemandMin.value ? parseInt(els.fScoreDemandMin.value, 10) : null,
     maxScoreDemand: els.fScoreDemandMax.value ? parseInt(els.fScoreDemandMax.value, 10) : null,
     minScoreRisk: els.fScoreRiskMin.value ? parseInt(els.fScoreRiskMin.value, 10) : null,
-    maxScoreRisk: els.fScoreRiskMax.value ? parseInt(els.fScoreRiskMax.value, 10) : null
+    maxScoreRisk: els.fScoreRiskMax.value ? parseInt(els.fScoreRiskMax.value, 10) : null,
+    minTrancoRank: els.fTrancoRankMin.value ? parseInt(els.fTrancoRankMin.value, 10) : null,
+    maxTrancoRank: els.fTrancoRankMax.value ? parseInt(els.fTrancoRankMax.value, 10) : null,
+    minMajesticRank: els.fMajesticRankMin.value ? parseInt(els.fMajesticRankMin.value, 10) : null,
+    maxMajesticRank: els.fMajesticRankMax.value ? parseInt(els.fMajesticRankMax.value, 10) : null,
+    minOprRank: els.fOprRankMin.value ? parseInt(els.fOprRankMin.value, 10) : null,
+    maxOprRank: els.fOprRankMax.value ? parseInt(els.fOprRankMax.value, 10) : null
   };
 }
 
@@ -367,6 +404,12 @@ function writeFilters(f: Partial<Filters>) {
   if (f.maxScoreDemand !== undefined) els.fScoreDemandMax.value = f.maxScoreDemand == null ? '' : String(f.maxScoreDemand);
   if (f.minScoreRisk !== undefined) els.fScoreRiskMin.value = f.minScoreRisk == null ? '' : String(f.minScoreRisk);
   if (f.maxScoreRisk !== undefined) els.fScoreRiskMax.value = f.maxScoreRisk == null ? '' : String(f.maxScoreRisk);
+  if (f.minTrancoRank !== undefined) els.fTrancoRankMin.value = f.minTrancoRank == null ? '' : String(f.minTrancoRank);
+  if (f.maxTrancoRank !== undefined) els.fTrancoRankMax.value = f.maxTrancoRank == null ? '' : String(f.maxTrancoRank);
+  if (f.minMajesticRank !== undefined) els.fMajesticRankMin.value = f.minMajesticRank == null ? '' : String(f.minMajesticRank);
+  if (f.maxMajesticRank !== undefined) els.fMajesticRankMax.value = f.maxMajesticRank == null ? '' : String(f.maxMajesticRank);
+  if (f.minOprRank !== undefined) els.fOprRankMin.value = f.minOprRank == null ? '' : String(f.minOprRank);
+  if (f.maxOprRank !== undefined) els.fOprRankMax.value = f.maxOprRank == null ? '' : String(f.maxOprRank);
 }
 
 const currentSort = { key: 'release_at' as Filters['sortKey'], dir: 'asc' as Filters['sortDir'] };
@@ -383,11 +426,21 @@ function buildOrderBy(f: Filters): string {
   if (f.sortKey === 'opr_score') {
     return `CASE WHEN opr_score IS NULL THEN 1 ELSE 0 END, opr_score ${dir}, name ASC`;
   }
+  if (f.sortKey === 'tranco_rank') {
+    return `CASE WHEN tranco_rank IS NULL THEN 1 ELSE 0 END, tranco_rank ${dir}, name ASC`;
+  }
+  if (f.sortKey === 'majestic_rank') {
+    return `CASE WHEN majestic_rank IS NULL THEN 1 ELSE 0 END, majestic_rank ${dir}, name ASC`;
+  }
+  if (f.sortKey === 'opr_rank') {
+    return `CASE WHEN opr_rank IS NULL THEN 1 ELSE 0 END, opr_rank ${dir}, name ASC`;
+  }
   if (f.sortKey === 'score_total') return `score_total ${dir}, score_authority DESC, name ASC`;
   if (f.sortKey === 'score_brand') return `score_brand ${dir}, score_total DESC, name ASC`;
   if (f.sortKey === 'score_authority') return `score_authority ${dir}, score_total DESC, name ASC`;
   if (f.sortKey === 'score_demand') return `score_demand ${dir}, score_total DESC, name ASC`;
   if (f.sortKey === 'score_risk') return `score_risk ${dir}, score_total DESC, name ASC`;
+  if (f.view === 'ranked') return `first_free_at ${dir}, score_total DESC, name ASC`;
   return `release_at ${dir}, name ASC`;
 }
 
@@ -403,7 +456,9 @@ const SHORT_KEY: Record<string, string> = {
   watch: 'wl', notes: 'nt', minLen: 'mn', maxLen: 'mx',
   minScoreTotal: 'stn', maxScoreTotal: 'stx', minScoreBrand: 'sbn', maxScoreBrand: 'sbx',
   minScoreAuthority: 'san', maxScoreAuthority: 'sax', minScoreDemand: 'sdn', maxScoreDemand: 'sdx',
-  minScoreRisk: 'srn', maxScoreRisk: 'srx'
+  minScoreRisk: 'srn', maxScoreRisk: 'srx',
+  minTrancoRank: 'trn', maxTrancoRank: 'trx', minMajesticRank: 'mjn', maxMajesticRank: 'mjx',
+  minOprRank: 'opn', maxOprRank: 'opx'
 };
 const LONG_KEY: Record<string, keyof Filters> = Object.fromEntries(
   Object.entries(SHORT_KEY).map(([k, v]) => [v, k as keyof Filters])
@@ -424,7 +479,7 @@ function filtersToQs(f: Filters): string {
   }
   if (f.minLen != null) p.set(SHORT_KEY.minLen, String(f.minLen));
   if (f.maxLen != null) p.set(SHORT_KEY.maxLen, String(f.maxLen));
-  for (const k of ['minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk'] as const) {
+  for (const k of ['minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk','minTrancoRank','maxTrancoRank','minMajesticRank','maxMajesticRank','minOprRank','maxOprRank'] as const) {
     if (f[k] != null) p.set(SHORT_KEY[k], String(f[k]));
   }
   return p.toString();
@@ -436,15 +491,15 @@ function qsToFilters(qs: string): Partial<Filters> {
   for (const [short, val] of p.entries()) {
     const long = LONG_KEY[short];
     if (!long) continue;
-    if (['minLen','maxLen','minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk'].includes(long)) {
+    if (['minLen','maxLen','minScoreTotal','maxScoreTotal','minScoreBrand','maxScoreBrand','minScoreAuthority','maxScoreAuthority','minScoreDemand','maxScoreDemand','minScoreRisk','maxScoreRisk','minTrancoRank','maxTrancoRank','minMajesticRank','maxMajesticRank','minOprRank','maxOprRank'].includes(long)) {
       const n = parseInt(val, 10);
       f[long] = isNaN(n) ? null : n;
     } else if (long === 'q' || long === 'tld' || long === 'from' || long === 'to') {
       f[long] = val;
     } else if (long === 'view') {
-      f[long] = val === 'released' || val === 'upcoming' || val === 'free' ? val : 'karens';
+      f[long] = val === 'released' || val === 'upcoming' || val === 'free' || val === 'ranked' ? val : 'karens';
     } else if (long === 'sortKey') {
-      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total', 'score_brand', 'score_authority', 'score_demand', 'score_risk'].includes(val) ? val : 'release_at';
+      f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total', 'score_brand', 'score_authority', 'score_demand', 'score_risk', 'tranco_rank', 'majestic_rank', 'opr_rank'].includes(val) ? val : 'release_at';
     } else if (long === 'sortDir') {
       f[long] = val === 'desc' ? 'desc' : 'asc';
     } else {
@@ -466,14 +521,16 @@ function syncUrl(f: Filters) {
 function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql: string; params: SqlValue[] } {
   const clauses: string[] = [];
   const params: SqlValue[] = [];
-  if (f.view === 'released') clauses.push('released = 1');
+  if (f.view === 'released') clauses.push('in_release_feed = 1 AND released = 1');
   else if (f.view === 'upcoming') {
-    clauses.push('released = 0');
+    clauses.push('in_release_feed = 1 AND released = 0');
     clauses.push("release_at >= date('now') AND release_at <= date('now', '+1 day')");
   } else if (f.view === 'free') {
-    clauses.push("released = 1 AND taken = 0 AND availability_status = 'free'");
+    clauses.push("in_release_feed = 1 AND released = 1 AND taken = 0 AND availability_status = 'free'");
+  } else if (f.view === 'ranked') {
+    clauses.push("ranked_candidate = 1 AND availability_status = 'free'");
   } else {
-    clauses.push('released = 0');
+    clauses.push('in_release_feed = 1 AND released = 0');
   }
   if (includeQ && f.q && !f.regex) {
     const q = f.q.toLowerCase();
@@ -481,8 +538,9 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
     clauses.push('base LIKE ?'); params.push(hasWildcard ? q : `%${q}%`);
   }
   if (f.tld) { clauses.push('tld = ?'); params.push(f.tld); }
-  if (f.from) { clauses.push('release_at >= ?'); params.push(f.from); }
-  if (f.to) { clauses.push('release_at <= ?'); params.push(f.to); }
+  const dateColumn = f.view === 'ranked' ? 'date(first_free_at)' : 'release_at';
+  if (f.from) { clauses.push(`${dateColumn} >= ?`); params.push(f.from); }
+  if (f.to) { clauses.push(`${dateColumn} <= ?`); params.push(f.to); }
   if (f.noDigit) clauses.push('has_digit = 0');
   if (f.noHyphen) clauses.push('has_hyphen = 0');
   if (f.onlyDigits) clauses.push('only_digits = 1');
@@ -505,6 +563,14 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
     ['score_authority', f.minScoreAuthority, f.maxScoreAuthority],
     ['score_demand', f.minScoreDemand, f.maxScoreDemand],
     ['score_risk', f.minScoreRisk, f.maxScoreRisk]
+  ] as const) {
+    if (min != null) { clauses.push(`${column} >= ?`); params.push(min); }
+    if (max != null) { clauses.push(`${column} <= ?`); params.push(max); }
+  }
+  for (const [column, min, max] of [
+    ['tranco_rank', f.minTrancoRank, f.maxTrancoRank],
+    ['majestic_rank', f.minMajesticRank, f.maxMajesticRank],
+    ['opr_rank', f.minOprRank, f.maxOprRank]
   ] as const) {
     if (min != null) { clauses.push(`${column} >= ?`); params.push(min); }
     if (max != null) { clauses.push(`${column} <= ?`); params.push(max); }
@@ -555,11 +621,16 @@ function rowFromObject(o: Record<string, unknown>): Row {
     taken_at: o.taken_at == null ? null : String(o.taken_at),
     avail_checked_at: o.avail_checked_at == null ? null : String(o.avail_checked_at),
     availability_status: o.availability_status == null ? null : String(o.availability_status),
-    availability_error: o.availability_error == null ? null : String(o.availability_error)
+    availability_error: o.availability_error == null ? null : String(o.availability_error),
+    in_release_feed: Number(o.in_release_feed),
+    ranked_candidate: Number(o.ranked_candidate),
+    ranking_first_seen_at: o.ranking_first_seen_at == null ? null : String(o.ranking_first_seen_at),
+    ranking_last_seen_at: o.ranking_last_seen_at == null ? null : String(o.ranking_last_seen_at),
+    first_free_at: o.first_free_at == null ? null : String(o.first_free_at)
   };
 }
 
-const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error, opr_rank, opr_score, cc_hosts, score_brand, score_authority, score_demand, score_risk, score_total, released, taken, taken_at, avail_checked_at, availability_status, availability_error';
+const SELECT_COLS = 'name, base, tld, release_at, length, has_digit, has_hyphen, only_digits, only_letters, is_palindrome, has_repeat, is_cvcv, is_word, tranco_rank, majestic_rank, majestic_refsubnets, wayback_first, wayback_count, wayback_checked, dns_a, dns_mx, dns_ns, dns_checked, dns_status, dns_error, opr_rank, opr_score, cc_hosts, score_brand, score_authority, score_demand, score_risk, score_total, released, taken, taken_at, avail_checked_at, availability_status, availability_error, in_release_feed, ranked_candidate, ranking_first_seen_at, ranking_last_seen_at, first_free_at';
 
 function runCount(f: Filters): number {
   if (!db) return 0;
@@ -611,7 +682,8 @@ function runDateBar(f: Filters, limit: number): Array<[string, number]> {
   if (!db) return [];
   const { sql, params } = buildWhere(f, true, true);
   const dir = f.view === 'released' || f.view === 'free' ? 'DESC' : 'ASC';
-  const stmt = db.prepare(`SELECT release_at AS d, COUNT(*) AS c FROM domains ${sql} GROUP BY release_at ORDER BY release_at ${dir} LIMIT ?`);
+  const dateExpr = f.view === 'ranked' ? 'date(first_free_at)' : 'release_at';
+  const stmt = db.prepare(`SELECT ${dateExpr} AS d, COUNT(*) AS c FROM domains ${sql} GROUP BY ${dateExpr} ORDER BY ${dateExpr} ${dir} LIMIT ?`);
   stmt.bind([...params, limit]);
   const out: Array<[string, number]> = [];
   while (stmt.step()) {
@@ -648,7 +720,7 @@ function fmtTime(iso: string | null): string {
 }
 
 function statusChip(r: Row): string {
-  if (!r.released) return '';
+  if (!r.released && !r.ranked_candidate) return '';
   if (r.availability_status === 'error') {
     return `<span class="sig rel-error" title="Tillgänglighetskontrollen misslyckades${r.availability_error ? ` · ${escapeHtml(r.availability_error)}` : ''}">Kontrollfel</span>`;
   }
@@ -664,6 +736,12 @@ function statusChip(r: Row): string {
 
 function scoreCell(value: number, kind: 'total' | 'brand' | 'authority' | 'demand' | 'risk', title: string): string {
   return `<span class="score-cell"><span class="score ${kind}" title="${title}: ${value}/100${kind === 'risk' ? ' (lägre är bättre)' : ''}">${kind === 'total' ? '💎 ' : ''}${value}</span></span>`;
+}
+
+function rankCell(rank: number | null, title: string, detail = ''): string {
+  if (rank == null) return '<span class="rank-cell">—</span>';
+  const tooltip = `${title}: #${rank.toLocaleString('sv-SE')}${detail ? ` · ${detail}` : ''}`;
+  return `<span class="rank-cell hit" title="${escapeHtml(tooltip)}">#${rank.toLocaleString('sv-SE')}</span>`;
 }
 
 function signalsHtml(r: Row): string {
@@ -694,7 +772,7 @@ function renderRow(idx: number, top: number): string {
   const row = getRow(idx);
   if (!row) {
     return `<div class="row" style="position:absolute;top:${top}px;left:0;right:0;height:${ROW_HEIGHT}px;">
-      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      <span></span><span class="text-slate-300">…</span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>`;
   }
   const url = iisSearchUrl(row.name);
@@ -710,9 +788,12 @@ function renderRow(idx: number, top: number): string {
     ${scoreCell(row.score_authority, 'authority', 'SEO- och historikpoäng')}
     ${scoreCell(row.score_demand, 'demand', 'Indikativ efterfrågan')}
     ${scoreCell(row.score_risk, 'risk', 'Riskpoäng')}
+    ${rankCell(row.majestic_rank, 'Majestic-rank', `${row.majestic_refsubnets ?? 0} ref-subnät`)}
+    ${rankCell(row.opr_rank, 'Open PageRank', `poäng ${row.opr_score?.toFixed(2) ?? '?'}`)}
+    ${rankCell(row.tranco_rank, 'Tranco-rank')}
     <span class="signals">${signalsHtml(row)}</span>
     <span class="len">${row.length}</span>
-    <span class="date">${escapeHtml(row.release_at)}</span>
+    <span class="date">${escapeHtml(activeView === 'ranked' ? (row.first_free_at?.slice(0, 10) || row.release_at) : row.release_at)}</span>
     <button class="more" data-action="more" title="Detaljer (Enter)">⋯</button>
   </div>`;
 }
@@ -805,6 +886,14 @@ function renderActivePills() {
     if (f[minKey] != null) pills.push({ label: `${label}≥${f[minKey]}`, clear: () => { writeFilters({ [minKey]: null } as Partial<Filters>); refresh(); } });
     if (f[maxKey] != null) pills.push({ label: `${label}≤${f[maxKey]}`, clear: () => { writeFilters({ [maxKey]: null } as Partial<Filters>); refresh(); } });
   }
+  for (const [label, minKey, maxKey] of [
+    ['Tranco-rank', 'minTrancoRank', 'maxTrancoRank'],
+    ['Majestic-rank', 'minMajesticRank', 'maxMajesticRank'],
+    ['OPR-rank', 'minOprRank', 'maxOprRank']
+  ] as const) {
+    if (f[minKey] != null) pills.push({ label: `${label}≥${f[minKey]}`, clear: () => { writeFilters({ [minKey]: null } as Partial<Filters>); refresh(); } });
+    if (f[maxKey] != null) pills.push({ label: `${label}≤${f[maxKey]}`, clear: () => { writeFilters({ [maxKey]: null } as Partial<Filters>); refresh(); } });
+  }
 
   if (pills.length === 0) {
     els.activePills.classList.add('hidden');
@@ -830,7 +919,9 @@ function renderBadges() {
     f.word, f.tranco, f.majestic, f.opr, f.cc, f.wayback, f.dns, f.watch, f.notes,
     f.minScoreTotal != null, f.maxScoreTotal != null, f.minScoreBrand != null, f.maxScoreBrand != null,
     f.minScoreAuthority != null, f.maxScoreAuthority != null, f.minScoreDemand != null, f.maxScoreDemand != null,
-    f.minScoreRisk != null, f.maxScoreRisk != null
+    f.minScoreRisk != null, f.maxScoreRisk != null,
+    f.minTrancoRank != null, f.maxTrancoRank != null, f.minMajesticRank != null, f.maxMajesticRank != null,
+    f.minOprRank != null, f.maxOprRank != null
   ].filter(Boolean).length;
   if (propsActive) { els.propsBadge.textContent = String(propsActive); els.propsBadge.classList.remove('hidden'); els.propsBtn.classList.add('active'); }
   else { els.propsBadge.classList.add('hidden'); els.propsBtn.classList.remove('active'); }
@@ -858,8 +949,15 @@ function updateViewPills() {
   // Datumkolumnen byter betydelse mellan vyerna
   const dateBtn = els.thead.querySelector<HTMLButtonElement>('[data-sort="release_at"]');
   if (dateBtn && dateBtn.childNodes[0]) {
-    dateBtn.childNodes[0].textContent = activeView === 'released' || activeView === 'free' ? 'Frisläpptes ' : 'Frisläpps ';
+    dateBtn.childNodes[0].textContent = activeView === 'ranked'
+      ? 'Sedd ledig '
+      : activeView === 'released' || activeView === 'free' ? 'Frisläpptes ' : 'Frisläpps ';
   }
+  const range = activeView === 'ranked' ? meta?.ranked?.date_range : meta?.date_range;
+  els.from.min = range?.min || '';
+  els.to.min = range?.min || '';
+  els.from.max = range?.max || '';
+  els.to.max = range?.max || '';
 }
 function updateTldPills() {
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.tld-pill')) {
@@ -900,6 +998,14 @@ function refresh() {
     mode = { kind: 'paged', total: runCount(f) };
   }
   const total = getTotal();
+  if (f.view === 'ranked') {
+    const ranked = meta?.ranked;
+    els.empty.textContent = (ranked?.free ?? 0) === 0 && (ranked?.unchecked ?? 0) > 0
+      ? `Första rankningsskanningen pågår · ${(ranked?.unchecked ?? 0).toLocaleString('sv-SE')} kandidater väntar`
+      : 'Inga träffar med valda filter';
+  } else {
+    els.empty.textContent = 'Inga träffar';
+  }
   els.spacer.style.height = `${total * ROW_HEIGHT}px`;
   els.viewport.scrollTop = 0;
 
@@ -910,7 +1016,10 @@ function refresh() {
   renderSortIndicators();
 
   const t1 = performance.now();
-  setStatus(`${total.toLocaleString('sv-SE')} träffar · ${(t1 - t0).toFixed(0)} ms${warning}`);
+  const rankedProgress = f.view === 'ranked' && meta?.ranked
+    ? ` · rankningskö ${Math.max(0, (meta.ranked.candidates ?? 0) - (meta.ranked.unchecked ?? 0)).toLocaleString('sv-SE')}/${(meta.ranked.candidates ?? 0).toLocaleString('sv-SE')} kontrollerade`
+    : '';
+  setStatus(`${total.toLocaleString('sv-SE')} träffar · ${(t1 - t0).toFixed(0)} ms${rankedProgress}${warning}`);
   render();
 }
 
@@ -921,7 +1030,9 @@ function openDrawer(row: Row) {
   drawerRow = row;
   els.drawerTitle.textContent = row.name;
   const days = Math.ceil((new Date(row.release_at).getTime() - Date.now()) / 86400000);
-  els.drawerSub.textContent = `${row.length} tecken · frisläpps ${row.release_at} (${days >= 0 ? `om ${days} d` : `${-days} d sedan`})`;
+  els.drawerSub.textContent = activeView === 'ranked' && row.first_free_at
+    ? `${row.length} tecken · först sedd ledig ${row.first_free_at.slice(0, 10)}`
+    : `${row.length} tecken · frisläpps ${row.release_at} (${days >= 0 ? `om ${days} d` : `${-days} d sedan`})`;
   drawerTab = 'overview';
   updateDrawerTabs();
   renderDrawerBody();
@@ -975,8 +1086,8 @@ function drawerOverviewHtml(r: Row): string {
       ? `Kontrollfel${r.dns_error ? `: ${escapeHtml(r.dns_error)}` : ''}`
       : r.dns_checked ? 'Inga records' : 'Inte kollat ännu';
 
-  const releasedSection = r.released
-    ? `${signalDetail(r.availability_status === 'free', r.availability_status === 'free' ? '✔' : r.availability_status === 'error' ? '⚠' : '✖', 'Registerstatus efter frisläpp',
+  const releasedSection = r.released || r.ranked_candidate
+    ? `${signalDetail(r.availability_status === 'free', r.availability_status === 'free' ? '✔' : r.availability_status === 'error' ? '⚠' : '✖', r.in_release_feed ? 'Registerstatus efter frisläpp' : 'Aktuell registerstatus',
         r.availability_status === 'occupied' || r.taken === 1
           ? `Registrerad igen${r.taken_at ? ` · upptäckt ${fmtTime(r.taken_at)}` : ''}`
           : r.availability_status === 'free'
@@ -1007,7 +1118,11 @@ function drawerOverviewHtml(r: Row): string {
       <dl class="kv">
         <dt>TLD</dt><dd>.${r.tld}</dd>
         <dt>Längd</dt><dd>${r.length} tecken</dd>
-        <dt>Frisläpps</dt><dd>${r.release_at} (${days >= 0 ? `om ${days} d` : `${-days} d sedan`})</dd>
+        ${r.in_release_feed ? `<dt>Frisläpps</dt><dd>${r.release_at} (${days >= 0 ? `om ${days} d` : `${-days} d sedan`})</dd>` : ''}
+        ${r.ranked_candidate ? `<dt>Först i ranking</dt><dd>${fmtTime(r.ranking_first_seen_at)}</dd>
+        <dt>Senast i ranking</dt><dd>${fmtTime(r.ranking_last_seen_at)}</dd>
+        <dt>Först sedd ledig</dt><dd>${fmtTime(r.first_free_at)}</dd>
+        <dt>Senast kontrollerad</dt><dd>${fmtTime(r.avail_checked_at)}</dd>` : ''}
       </dl>
     </section>
     <section class="mb-4">
@@ -1147,11 +1262,11 @@ function download(filename: string, content: string, mime: string) {
 }
 function exportCsv() {
   const rows = collectAll();
-  const headers = ['name','tld','release_at','length','score_total','score_brand','score_authority','score_demand','score_risk','is_word','tranco_rank','majestic_rank','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','dns_status','released','taken','availability_status'];
+  const headers = ['name','tld','release_at','length','score_total','score_brand','score_authority','score_demand','score_risk','is_word','tranco_rank','majestic_rank','majestic_refsubnets','opr_rank','opr_score','cc_hosts','wayback_count','dns_a','dns_mx','dns_ns','dns_status','released','taken','availability_status','ranked_candidate','ranking_first_seen_at','ranking_last_seen_at','first_free_at','avail_checked_at'];
   const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [headers.join(',')];
   for (const r of rows) {
-    lines.push([r.name, r.tld, r.release_at, r.length, r.score_total, r.score_brand, r.score_authority, r.score_demand, r.score_risk, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.dns_status ?? '', r.released, r.taken ?? '', r.availability_status ?? ''].map(esc).join(','));
+    lines.push([r.name, r.tld, r.release_at, r.length, r.score_total, r.score_brand, r.score_authority, r.score_demand, r.score_risk, r.is_word, r.tranco_rank ?? '', r.majestic_rank ?? '', r.majestic_refsubnets ?? '', r.opr_rank ?? '', r.opr_score ?? '', r.cc_hosts ?? '', r.wayback_count ?? '', r.dns_a ?? '', r.dns_mx ?? '', r.dns_ns ?? '', r.dns_status ?? '', r.released, r.taken ?? '', r.availability_status ?? '', r.ranked_candidate, r.ranking_first_seen_at ?? '', r.ranking_last_seen_at ?? '', r.first_free_at ?? '', r.avail_checked_at ?? ''].map(esc).join(','));
   }
   download(`expiring-domains-${todayISO()}.csv`, lines.join('\n'), 'text/csv');
 }
@@ -1187,7 +1302,7 @@ function resetAll(doRefresh = true) {
 function applyDatePreset(p: typeof activePreset) {
   activePreset = p;
   // I Nysläppta-vyn pekar intervallen bakåt i tiden
-  const back = activeView === 'released' || activeView === 'free';
+  const back = activeView === 'released' || activeView === 'free' || activeView === 'ranked';
   switch (p) {
     case 'all': writeFilters({ from: '', to: '' }); break;
     case 'today': writeFilters({ from: todayISO(), to: todayISO() }); break;
@@ -1273,8 +1388,8 @@ function wireUi() {
       if (v === activeView) return;
       activeView = v;
       // Guldkornsvyer rankas på poäng; standardvyer på datum.
-      currentSort.key = v === 'upcoming' || v === 'free' ? 'score_total' : 'release_at';
-      currentSort.dir = v === 'released' || v === 'upcoming' || v === 'free' ? 'desc' : 'asc';
+      currentSort.key = v === 'upcoming' || v === 'free' || v === 'ranked' ? 'score_total' : 'release_at';
+      currentSort.dir = v === 'released' || v === 'upcoming' || v === 'free' || v === 'ranked' ? 'desc' : 'asc';
       // Datumintervall från andra vyn pekar åt fel håll — nollställ
       activePreset = '';
       updateDatePresets();
@@ -1321,7 +1436,9 @@ function wireUi() {
   for (const el of [
     els.fScoreTotalMin, els.fScoreTotalMax, els.fScoreBrandMin, els.fScoreBrandMax,
     els.fScoreAuthorityMin, els.fScoreAuthorityMax, els.fScoreDemandMin, els.fScoreDemandMax,
-    els.fScoreRiskMin, els.fScoreRiskMax
+    els.fScoreRiskMin, els.fScoreRiskMax,
+    els.fTrancoRankMin, els.fTrancoRankMax, els.fMajesticRankMin, els.fMajesticRankMax,
+    els.fOprRankMin, els.fOprRankMax
   ]) {
     el.addEventListener('input', debouncedRefresh);
   }
@@ -1337,7 +1454,8 @@ function wireUi() {
         currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
       } else {
         currentSort.key = k;
-        currentSort.dir = k === 'score_risk' || k === 'name' || k === 'length' || k === 'release_at' ? 'asc' : 'desc';
+        currentSort.dir = k === 'score_risk' || k === 'name' || k === 'length' || k === 'release_at' ||
+          k === 'tranco_rank' || k === 'majestic_rank' || k === 'opr_rank' ? 'asc' : 'desc';
       }
       refresh();
     });
@@ -1446,8 +1564,10 @@ function setMeta(m: Meta | null) {
   const se = (m.by_tld.se ?? 0).toLocaleString('sv-SE');
   const nu = (m.by_tld.nu ?? 0).toLocaleString('sv-SE');
   const enr = m.enrichments;
+  const ranked = m.ranked;
   const extra = enr ? ` · 📖 ${(enr.word_hits ?? 0).toLocaleString('sv-SE')} · ⭐ ${(enr.tranco_hits ?? 0).toLocaleString('sv-SE')} · 🔗 ${(enr.majestic_hits ?? 0).toLocaleString('sv-SE')} · ⏳ ${(enr.wayback_hits ?? 0).toLocaleString('sv-SE')}/${(enr.coverage_wayback ?? 0)}% · 📡 ${(enr.dns_active ?? 0).toLocaleString('sv-SE')}/${(enr.coverage_dns ?? 0)}%${(enr.dns_errors ?? 0) > 0 ? ` · ⚠ DNS ${(enr.dns_errors ?? 0).toLocaleString('sv-SE')}` : ''}` : '';
-  els.meta.textContent = `${se} .se · ${nu} .nu · uppd. ${updated}${extra}`;
+  const rankedExtra = ranked ? ` · 🏆 ${(ranked.free ?? 0).toLocaleString('sv-SE')}/${(ranked.candidates ?? 0).toLocaleString('sv-SE')}` : '';
+  els.meta.textContent = `${se} .se · ${nu} .nu · uppd. ${updated}${extra}${rankedExtra}`;
 }
 
 async function loadMeta(): Promise<Meta | null> {
@@ -1469,15 +1589,12 @@ async function main() {
     const [m, database] = await Promise.all([loadMeta(), loadDb()]);
     db = database; meta = m;
     setMeta(m);
-    if (m?.date_range?.min) { els.from.min = m.date_range.min; els.to.min = m.date_range.min; }
-    if (m?.date_range?.max) { els.from.max = m.date_range.max; els.to.max = m.date_range.max; }
-
     const fromUrl = qsToFilters(location.search.replace(/^\?/, ''));
     if (Object.keys(fromUrl).length) writeFilters(fromUrl);
-    if ((fromUrl.view === 'released' || fromUrl.view === 'upcoming' || fromUrl.view === 'free') && !fromUrl.sortDir) {
+    if ((fromUrl.view === 'released' || fromUrl.view === 'upcoming' || fromUrl.view === 'free' || fromUrl.view === 'ranked') && !fromUrl.sortDir) {
       currentSort.dir = 'desc';
     }
-    if ((fromUrl.view === 'upcoming' || fromUrl.view === 'free') && !fromUrl.sortKey) {
+    if ((fromUrl.view === 'upcoming' || fromUrl.view === 'free' || fromUrl.view === 'ranked') && !fromUrl.sortKey) {
       currentSort.key = 'score_total';
     }
     updateTldPills();
