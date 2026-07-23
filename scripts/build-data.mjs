@@ -13,7 +13,12 @@ import { enrichWayback } from './lib/wayback.mjs';
 import { enrichDns, checkAvailability, checkRankedAvailability } from './lib/dnscheck.mjs';
 import { loadMajesticMap } from './lib/backlinks.mjs';
 import { loadOpenPageRankMap } from './lib/openpagerank.mjs';
-import { loadCcDomainMap } from './lib/commoncrawl.mjs';
+import {
+  loadCcDomainMap,
+  loadHistoricalCcDomainMap,
+  clearHistoricalCcPending
+} from './lib/commoncrawl.mjs';
+import { loadWikipediaDomainMap } from './lib/wikipedia.mjs';
 import { enrichAhrefsDr } from './lib/ahrefs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +53,9 @@ const RELEASED_DAYS = parseInt(process.env.RELEASED_DAYS || '90', 10);
 const RANKED_AVAIL_MAX_PER_RUN = parseInt(process.env.RANKED_AVAIL_MAX || '5000', 10);
 const RANKED_FREE_REFRESH_HOURS = parseInt(process.env.RANKED_FREE_REFRESH_HOURS || '23', 10);
 const RANKED_OCCUPIED_REFRESH_DAYS = parseInt(process.env.RANKED_OCCUPIED_REFRESH_DAYS || '30', 10);
+const DISCOVERY_FREE_REFRESH_DAYS = parseInt(process.env.DISCOVERY_FREE_REFRESH_DAYS || '7', 10);
+const DISCOVERY_IMPORT_MAX_PER_RUN = parseInt(process.env.DISCOVERY_IMPORT_MAX || '5000', 10);
+const CC_HISTORY_DOWNLOADS_PER_RUN = parseInt(process.env.CC_HISTORY_DOWNLOADS || '0', 10);
 const AHREFS_DR_MAX_PER_RUN = parseInt(process.env.AHREFS_DR_MAX || '75', 10);
 const AHREFS_DR_REFRESH_DAYS = parseInt(process.env.AHREFS_DR_REFRESH_DAYS || '30', 10);
 
@@ -144,6 +152,29 @@ async function loadCc() {
   }
 }
 
+async function loadWikipedia() {
+  if (process.env.SKIP_WIKIPEDIA === '1') { warn('SKIP_WIKIPEDIA=1'); return null; }
+  try {
+    return await loadWikipediaDomainMap(log, CACHE_DIR);
+  } catch (err) {
+    warn(`Wikipedia misslyckades: ${err.message}`);
+    return null;
+  }
+}
+
+async function loadHistoricalCc(cache) {
+  if (process.env.SKIP_CC === '1' || process.env.SKIP_CC_HISTORY === '1') return null;
+  try {
+    return await loadHistoricalCcDomainMap(log, CACHE_DIR, {
+      completedIds: cache.getCompletedHistoricalCcIds(),
+      allowDownload: CC_HISTORY_DOWNLOADS_PER_RUN > 0
+    });
+  } catch (err) {
+    warn(`Historisk Common Crawl misslyckades: ${err.message}`);
+    return null;
+  }
+}
+
 // ─── Mönster ───────────────────────────────────────────────────────────────
 function isPalindrome(s) {
   if (s.length < 2) return false;
@@ -183,7 +214,10 @@ function logPoints(value, cap, points) {
 
 // Fyra transparenta delpoäng byggda enbart från data som redan finns i pipelinen.
 // Efterfrågan är indikativ tills faktisk sökvolym kopplas på i ett senare steg.
-function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, wbCount, ahrefsDr }) {
+function scoreDomain({
+  base, word, trancoRank, maj, oprData, ccHosts, ccGraphCount, ccFirstGraph,
+  wikipediaLinks, wbFirst, wbCount, ahrefsDr
+}) {
   const asciiOrSwedishLetters = /^[a-zåäö]+$/.test(base);
   const hasDigit = /\d/.test(base);
   const hyphens = (base.match(/-/g) || []).length;
@@ -209,6 +243,14 @@ function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, w
   authority += Math.min(25, Math.max(0, (oprData?.score ?? 0) / 10 * 25));
   authority += logPoints(wbCount, 1000, 15);
   authority += logPoints(ccHosts, 1000, 10);
+  authority += logPoints(wikipediaLinks, 10000, 15);
+  authority += Math.min(8, Math.max(0, (ccGraphCount ?? 0) - 1) * 2);
+  if (ccFirstGraph) {
+    const graphYear = parseInt(String(ccFirstGraph).match(/cc-main-(\d{4})/)?.[1] || '', 10);
+    if (graphYear > 2000) {
+      authority += Math.min(10, (new Date().getUTCFullYear() - graphYear) * 0.8);
+    }
+  }
   if (wbFirst) {
     const firstYear = parseInt(String(wbFirst).slice(0, 4), 10);
     if (firstYear > 1990) authority += Math.min(10, (new Date().getUTCFullYear() - firstYear) * 0.7);
@@ -227,6 +269,7 @@ function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, w
   if (trancoRank) demand += Math.max(5, 20 * (1 - Math.log10(Math.max(1, trancoRank)) / 6));
   demand += logPoints(maj?.refSubNets, 100, 10);
   demand += logPoints(ccHosts, 100, 5);
+  demand += logPoints(wikipediaLinks, 1000, 10);
 
   let risk = 0;
   if (base.startsWith('xn--')) risk += 30;
@@ -251,7 +294,7 @@ function scoreDomain({ base, word, trancoRank, maj, oprData, ccHosts, wbFirst, w
 }
 
 // ─── Bygg sqlite ───────────────────────────────────────────────────────────
-function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
+function buildDatabase(rows, words, tranco, majestic, opr, cc, wikipedia, cacheRows) {
   if (existsSync(DB_PATH)) rmSync(DB_PATH);
   const db = new Database(DB_PATH);
   db.pragma('journal_mode = OFF');
@@ -305,6 +348,17 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       availability_error TEXT,
       in_release_feed   INTEGER NOT NULL DEFAULT 1,
       ranked_candidate  INTEGER NOT NULL DEFAULT 0,
+      source_tranco      INTEGER NOT NULL DEFAULT 0,
+      source_majestic    INTEGER NOT NULL DEFAULT 0,
+      source_opr         INTEGER NOT NULL DEFAULT 0,
+      source_commoncrawl INTEGER NOT NULL DEFAULT 0,
+      source_cc_history  INTEGER NOT NULL DEFAULT 0,
+      source_wikipedia   INTEGER NOT NULL DEFAULT 0,
+      wikipedia_links    INTEGER,
+      cc_graph_count     INTEGER NOT NULL DEFAULT 0,
+      cc_first_graph     TEXT,
+      cc_last_graph      TEXT,
+      discovery_priority INTEGER NOT NULL DEFAULT 0,
       ranking_first_seen_at TEXT,
       ranking_last_seen_at TEXT,
       first_free_at     TEXT
@@ -323,7 +377,11 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       ahrefs_dr, ahrefs_dr_checked_at, ahrefs_dr_status, ahrefs_dr_error,
       score_brand, score_authority, score_demand, score_risk, score_total,
       released, taken, taken_at, avail_checked_at, availability_status, availability_error,
-      in_release_feed, ranked_candidate, ranking_first_seen_at, ranking_last_seen_at, first_free_at
+      in_release_feed, ranked_candidate,
+      source_tranco, source_majestic, source_opr,
+      source_commoncrawl, source_cc_history, source_wikipedia,
+      wikipedia_links, cc_graph_count, cc_first_graph, cc_last_graph, discovery_priority,
+      ranking_first_seen_at, ranking_last_seen_at, first_free_at
     ) VALUES (
       @name, @base, @tld, @release_at, @length,
       @has_digit, @has_hyphen, @only_digits, @only_letters,
@@ -335,12 +393,16 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       @ahrefs_dr, @ahrefs_dr_checked_at, @ahrefs_dr_status, @ahrefs_dr_error,
       @score_brand, @score_authority, @score_demand, @score_risk, @score_total,
       @released, @taken, @taken_at, @avail_checked_at, @availability_status, @availability_error,
-      @in_release_feed, @ranked_candidate, @ranking_first_seen_at, @ranking_last_seen_at, @first_free_at
+      @in_release_feed, @ranked_candidate,
+      @source_tranco, @source_majestic, @source_opr,
+      @source_commoncrawl, @source_cc_history, @source_wikipedia,
+      @wikipedia_links, @cc_graph_count, @cc_first_graph, @cc_last_graph, @discovery_priority,
+      @ranking_first_seen_at, @ranking_last_seen_at, @first_free_at
     )
   `);
 
   const stats = {
-    word: 0, tranco: 0, majestic: 0, opr: 0, cc: 0,
+    word: 0, tranco: 0, majestic: 0, opr: 0, cc: 0, wikipedia: 0,
     waybackChecked: 0, waybackHits: 0,
     dnsChecked: 0, dnsAny: 0, dnsErrors: 0,
     ahrefsChecked: 0, ahrefsHits: 0, ahrefsErrors: 0,
@@ -362,7 +424,19 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       const oprData = r.opr_rank != null
         ? { rank: r.opr_rank, score: r.opr_score ?? 0 }
         : (opr ? opr.get(name) ?? null : null);
-      const ccHosts = cc ? cc.get(name) ?? null : null;
+      const currentCcHosts = cc ? cc.get(name) ?? null : null;
+      const ccHosts = r.cc_hosts ?? currentCcHosts;
+      const currentWikipediaLinks = wikipedia ? wikipedia.get(name) ?? null : null;
+      const wikipediaLinks = r.wikipedia_links ?? currentWikipediaLinks;
+      const sourceTranco = r.source_tranco ?? (trancoRank != null ? 1 : 0);
+      const sourceMajestic = r.source_majestic ?? (maj != null ? 1 : 0);
+      const sourceOpr = r.source_opr ?? (oprData != null ? 1 : 0);
+      const sourceCommoncrawl = r.source_commoncrawl ?? (currentCcHosts != null ? 1 : 0);
+      const sourceCcHistory = r.source_cc_history ?? 0;
+      const sourceWikipedia = r.source_wikipedia ?? (currentWikipediaLinks != null ? 1 : 0);
+      const ccGraphCount = r.cc_graph_count ?? (currentCcHosts != null ? 1 : 0);
+      const ccFirstGraph = r.cc_first_graph ?? (currentCcHosts != null ? cc?.sourceVersion ?? null : null);
+      const ccLastGraph = r.cc_last_graph ?? (currentCcHosts != null ? cc?.sourceVersion ?? null : null);
       const cache = cacheRows.get(name);
 
       const wbFirst = cache?.wayback_first ?? null;
@@ -379,8 +453,8 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       const ahrefsDrStatus = cache?.ahrefs_dr_status ?? null;
       const ahrefsDrError = cache?.ahrefs_dr_error ?? null;
       const scores = scoreDomain({
-        base, word, trancoRank, maj, oprData, ccHosts,
-        wbFirst, wbCount, ahrefsDr
+        base, word, trancoRank, maj, oprData, ccHosts, ccGraphCount, ccFirstGraph,
+        wikipediaLinks, wbFirst, wbCount, ahrefsDr
       });
 
       if (word) stats.word++;
@@ -388,6 +462,7 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
       if (maj) stats.majestic++;
       if (oprData) stats.opr++;
       if (ccHosts != null) stats.cc++;
+      if (wikipediaLinks != null) stats.wikipedia++;
       if (wbChecked) {
         stats.waybackChecked++;
         if ((wbCount ?? 0) > 0) stats.waybackHits++;
@@ -450,6 +525,17 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
         availability_error: r.avail_error ?? null,
         in_release_feed: r.in_release_feed ?? 1,
         ranked_candidate: r.ranked_candidate ?? 0,
+        source_tranco: sourceTranco,
+        source_majestic: sourceMajestic,
+        source_opr: sourceOpr,
+        source_commoncrawl: sourceCommoncrawl,
+        source_cc_history: sourceCcHistory,
+        source_wikipedia: sourceWikipedia,
+        wikipedia_links: wikipediaLinks,
+        cc_graph_count: ccGraphCount,
+        cc_first_graph: ccFirstGraph,
+        cc_last_graph: ccLastGraph,
+        discovery_priority: r.discovery_priority ?? 0,
         ranking_first_seen_at: r.ranking_first_seen_at ?? null,
         ranking_last_seen_at: r.ranking_last_seen_at ?? null,
         first_free_at: r.first_free_at ?? null
@@ -479,6 +565,9 @@ function buildDatabase(rows, words, tranco, majestic, opr, cc, cacheRows) {
     CREATE INDEX idx_release_feed ON domains(in_release_feed, released, release_at);
     CREATE INDEX idx_ranked_free ON domains(ranked_candidate, availability_status, score_total);
     CREATE INDEX idx_ranked_first_free ON domains(first_free_at);
+    CREATE INDEX idx_source_cc ON domains(source_commoncrawl, source_cc_history);
+    CREATE INDEX idx_source_wikipedia ON domains(source_wikipedia, wikipedia_links);
+    CREATE INDEX idx_discovery_priority ON domains(discovery_priority);
   `);
 
   db.exec('VACUUM;');
@@ -516,6 +605,7 @@ function buildMeta(rows, stats, totalCount) {
       majestic_hits: stats.majestic,
       opr_hits: stats.opr,
       cc_hits: stats.cc,
+      wikipedia_hits: stats.wikipedia,
       wayback_checked: stats.waybackChecked,
       wayback_hits: stats.waybackHits,
       dns_checked: stats.dnsChecked,
@@ -557,14 +647,20 @@ async function main() {
   // Kvar i karens = releasefönstret har inte börjat ännu.
   const future = all.filter((r) => r.release_at > releasedThrough);
 
-  // 2. Snabba berikningar parallellt
-  const [words, tranco, majestic, opr, cc] = await Promise.all([
+  const cache = new EnrichmentCache(CACHE_DB);
+
+  // 2. Snabba berikningar och kandidatuniversum parallellt
+  const [words, tranco, majestic, opr, cc, wikipedia] = await Promise.all([
     loadWordSet(),
     loadTrancoMap(),
     loadMajestic(),
     loadOpr(),
-    loadCc()
+    loadCc(),
+    loadWikipedia()
   ]);
+  // Historiska grafer laddas efter den aktuella så att en tom Actions-cache
+  // aldrig behöver hämta två stora Common Crawl-filer samtidigt.
+  const historicalCc = await loadHistoricalCc(cache);
 
   // 3. Rolling enrichment — prioritera domäner som frisläpps snarast så att
   // dagens batch täcker det användarna faktiskt tittar på
@@ -577,10 +673,24 @@ async function main() {
     return `${releaseAt.get(names[0])} → ${releaseAt.get(names[n - 1])}`;
   };
 
-  const cache = new EnrichmentCache(CACHE_DB);
-
   const rankedSync = cache.recordRankedCandidates({ tranco, majestic, opr });
-  log(`  Rankningskandidater: ${rankedSync.active.toLocaleString('sv-SE')} aktiva · ${rankedSync.newCandidates.toLocaleString('sv-SE')} nya · källor ${rankedSync.sourcesUpdated.join(', ') || 'inga'}`);
+  const discoverySync = cache.recordDiscoveryCandidates(
+    { commoncrawl: cc, wikipedia, historicalCc, words },
+    { maxPerRun: DISCOVERY_IMPORT_MAX_PER_RUN }
+  );
+  const historyProgress = historicalCc
+    ? discoverySync.sources.find((source) =>
+        source.source === 'commoncrawl_history' &&
+        source.version === historicalCc.sourceVersion
+      )
+    : null;
+  if (historyProgress?.completed && clearHistoricalCcPending(CACHE_DIR, historyProgress.version)) {
+    log(`  Historisk CC: ${historyProgress.version} färdigimporterad, pending-cachen rensad`);
+  }
+  const importedSources = discoverySync.sources
+    .filter((source) => source.imported > 0)
+    .map((source) => `${source.source} ${source.cursor.toLocaleString('sv-SE')}/${source.total.toLocaleString('sv-SE')}`);
+  log(`  Kandidatkällor: ${rankedSync.active.toLocaleString('sv-SE')} aktiva före import · ${discoverySync.imported.toLocaleString('sv-SE')} importerade denna körning${importedSources.length ? ` · ${importedSources.join(' · ')}` : ''}`);
 
   // Nysläppta: anteckna dagens karensdata, kolla om frisläppta domäner tagits
   cache.recordKarens(all);
@@ -608,6 +718,7 @@ async function main() {
   if (process.env.SKIP_RANKED_AVAIL !== '1' && RANKED_AVAIL_MAX_PER_RUN > 0) {
     const rankedDue = cache.getRankedDue(RANKED_AVAIL_MAX_PER_RUN, {
       freeHours: RANKED_FREE_REFRESH_HOURS,
+      discoveryFreeDays: DISCOVERY_FREE_REFRESH_DAYS,
       occupiedDays: RANKED_OCCUPIED_REFRESH_DAYS
     });
     rankedCheck = await checkRankedAvailability(rankedDue, cache, { log });
@@ -668,6 +779,7 @@ async function main() {
 
   // 4. Hämta cachade berikningar för alla aktuella domäner
   const cacheRows = cache.getMany([...allDomains, ...releasedNames, ...rankedFreeNames]);
+  const discoverySourceStats = cache.getDiscoverySourceStats();
   cache.close();
 
   // 5. Bygg sqlite. Rankade lediga domäner slås ihop med karensrader när de
@@ -696,7 +808,19 @@ async function main() {
       majestic_rank: ranked.majestic_rank,
       majestic_refsubnets: ranked.majestic_refsubnets,
       opr_rank: ranked.opr_rank,
-      opr_score: ranked.opr_score
+      opr_score: ranked.opr_score,
+      source_tranco: ranked.in_tranco ?? 0,
+      source_majestic: ranked.in_majestic ?? 0,
+      source_opr: ranked.in_opr ?? 0,
+      source_commoncrawl: ranked.in_commoncrawl ?? 0,
+      source_cc_history: ranked.in_commoncrawl_history ?? 0,
+      source_wikipedia: ranked.in_wikipedia ?? 0,
+      wikipedia_links: ranked.wikipedia_links,
+      cc_hosts: ranked.cc_hosts,
+      cc_graph_count: ranked.cc_graph_count ?? 0,
+      cc_first_graph: ranked.cc_first_graph,
+      cc_last_graph: ranked.cc_last_graph,
+      discovery_priority: ranked.candidate_priority ?? 0
     };
     if (existing) {
       Object.assign(existing, rankedFields);
@@ -723,10 +847,10 @@ async function main() {
     }
   }
   const dbRows = [...dbRowMap.values()];
-  log(`→ Bygger SQLite med ${dbRows.length.toLocaleString('sv-SE')} rader (${releasedRows.length} nysläppta · ${rankedFree.length} rankade lediga)`);
-  const stats = buildDatabase(dbRows, words, tranco, majestic, opr, cc, cacheRows);
+  log(`→ Bygger SQLite med ${dbRows.length.toLocaleString('sv-SE')} rader (${releasedRows.length} nysläppta · ${rankedFree.length} äldre lediga)`);
+  const stats = buildDatabase(dbRows, words, tranco, majestic, opr, cc, wikipedia, cacheRows);
 
-  log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}, opr=${stats.opr}, cc=${stats.cc}`);
+  log(`  Berikningar: ord=${stats.word}, tranco=${stats.tranco}, majestic=${stats.majestic}, opr=${stats.opr}, cc=${stats.cc}, wikipedia=${stats.wikipedia}`);
   log(`  Wayback: ${stats.waybackChecked} kollade, ${stats.waybackHits} med snapshots`);
   log(`  DNS: ${stats.dnsChecked} kollade, ${stats.dnsAny} med aktiva records`);
   log(`  Ahrefs DR: ${stats.ahrefsChecked} kollade, ${stats.ahrefsHits} med DR över 0`);
@@ -746,9 +870,14 @@ async function main() {
     occupied: rankedStats.occupied,
     errors: rankedStats.errors,
     unchecked: rankedStats.unchecked,
-    new_this_run: rankedSync.newCandidates,
+    new_this_run: rankedSync.newCandidates + discoverySync.newCandidates,
     checked_this_run: rankedCheck.checked,
-    sources_updated: rankedSync.sourcesUpdated,
+    imported_this_run: discoverySync.imported,
+    sources_updated: [
+      ...rankedSync.sourcesUpdated,
+      ...discoverySync.sources.filter((source) => source.imported > 0).map((source) => source.source)
+    ],
+    source_progress: discoverySourceStats,
     date_range: {
       min: rankedFree.length ? rankedFree[0].first_free_at.slice(0, 10) : null,
       max: rankedFree.length ? rankedFree[rankedFree.length - 1].first_free_at.slice(0, 10) : null

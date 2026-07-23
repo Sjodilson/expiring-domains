@@ -4,6 +4,39 @@
 import { mkdirSync, existsSync } from 'node:fs';
 import Database from 'better-sqlite3';
 
+function candidateBase(domain) {
+  const match = String(domain).toLowerCase().match(/^([a-z0-9åäö](?:[a-z0-9åäö-]{0,61}[a-z0-9åäö])?)\.(se|nu)$/);
+  return match ? { base: match[1], tld: match[2] } : null;
+}
+
+function candidatePriority(domain, { words, ccHosts = 0, wikipediaLinks = 0, historical = false } = {}) {
+  const parsed = candidateBase(domain);
+  if (!parsed) return null;
+  const { base } = parsed;
+  const letters = /^[a-zåäö]+$/.test(base);
+  const word = words instanceof Set && words.has(base);
+  let score = 0;
+
+  if (word) score += 350;
+  if (wikipediaLinks > 0) score += 250 + Math.min(140, Math.log10(wikipediaLinks + 1) * 70);
+  if (ccHosts > 0) score += (historical ? 90 : 60) + Math.min(100, Math.log10(ccHosts + 1) * 50);
+  if (letters) score += 80;
+  if (!base.includes('-')) score += 40;
+  if (!/\d/.test(base)) score += 30;
+
+  if (base.length <= 4) score += 220;
+  else if (base.length <= 6) score += 180;
+  else if (base.length <= 8) score += 140;
+  else if (base.length <= 10) score += 100;
+  else if (base.length <= 12) score += 70;
+  else if (base.length <= 18) score += 30;
+  else score -= 30;
+
+  if (base.includes('-')) score -= 35;
+  if (/\d/.test(base)) score -= 45;
+  return Math.max(0, Math.round(score));
+}
+
 export class EnrichmentCache {
   constructor(path) {
     mkdirSync(path.replace(/\\[^\\]+$/, '').replace(/\/[^/]+$/, ''), { recursive: true });
@@ -75,9 +108,9 @@ export class EnrichmentCache {
     this.ensureColumn('karens', 'avail_status', 'TEXT');
     this.ensureColumn('karens', 'avail_error', 'TEXT');
 
-    // Alla .se/.nu-domäner som förekommer i minst en rankningskälla. Tabellen
-    // är separat från karenshistoriken eftersom äldre lediga domäner saknar ett
-    // känt frisläppningsdatum.
+    // Alla .se/.nu-domäner som förekommer i minst en ranking- eller
+    // discoverykälla. Tabellen är separat från karenshistoriken eftersom äldre
+    // lediga domäner saknar ett känt frisläppningsdatum.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS ranked_candidates (
         domain                  TEXT PRIMARY KEY,
@@ -94,6 +127,15 @@ export class EnrichmentCache {
         in_opr                  INTEGER NOT NULL DEFAULT 0,
         opr_rank                INTEGER,
         opr_score               REAL,
+        in_commoncrawl          INTEGER NOT NULL DEFAULT 0,
+        in_commoncrawl_history  INTEGER NOT NULL DEFAULT 0,
+        cc_hosts                INTEGER,
+        cc_graph_count          INTEGER NOT NULL DEFAULT 0,
+        cc_first_graph          TEXT,
+        cc_last_graph           TEXT,
+        in_wikipedia            INTEGER NOT NULL DEFAULT 0,
+        wikipedia_links         INTEGER,
+        candidate_priority      INTEGER NOT NULL DEFAULT 0,
         taken                   INTEGER,
         first_free_at           TEXT,
         avail_checked_at        TEXT,
@@ -104,6 +146,30 @@ export class EnrichmentCache {
       CREATE INDEX IF NOT EXISTS idx_ranked_active ON ranked_candidates(active);
       CREATE INDEX IF NOT EXISTS idx_ranked_avail ON ranked_candidates(active, avail_status, avail_checked_at);
       CREATE INDEX IF NOT EXISTS idx_ranked_free ON ranked_candidates(active, first_free_at) WHERE avail_status = 'free';
+    `);
+    this.ensureColumn('ranked_candidates', 'in_commoncrawl', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('ranked_candidates', 'in_commoncrawl_history', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('ranked_candidates', 'cc_hosts', 'INTEGER');
+    this.ensureColumn('ranked_candidates', 'cc_graph_count', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('ranked_candidates', 'cc_first_graph', 'TEXT');
+    this.ensureColumn('ranked_candidates', 'cc_last_graph', 'TEXT');
+    this.ensureColumn('ranked_candidates', 'in_wikipedia', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('ranked_candidates', 'wikipedia_links', 'INTEGER');
+    this.ensureColumn('ranked_candidates', 'candidate_priority', 'INTEGER NOT NULL DEFAULT 0');
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS source_sync (
+        source        TEXT NOT NULL,
+        version       TEXT NOT NULL,
+        cursor        INTEGER NOT NULL DEFAULT 0,
+        total         INTEGER NOT NULL DEFAULT 0,
+        completed_at  TEXT,
+        updated_at    TEXT NOT NULL,
+        PRIMARY KEY (source, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_source_sync_complete
+        ON source_sync(source, completed_at);
+      CREATE INDEX IF NOT EXISTS idx_ranked_priority
+        ON ranked_candidates(active, avail_status, candidate_priority);
     `);
     this.upsertKarensStmt = this.db.prepare(`
       INSERT INTO karens (domain, tld, release_at) VALUES (?, ?, ?)
@@ -378,12 +444,16 @@ export class EnrichmentCache {
       this.db.prepare(`
         UPDATE ranked_candidates SET
           active = CASE
-            WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1 THEN 1
+            WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1
+              OR in_commoncrawl = 1 OR in_commoncrawl_history = 1 OR in_wikipedia = 1
+            THEN 1
             WHEN missing_runs + 1 >= 3 THEN 0
             ELSE active
           END,
           missing_runs = CASE
-            WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1 THEN 0
+            WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1
+              OR in_commoncrawl = 1 OR in_commoncrawl_history = 1 OR in_wikipedia = 1
+            THEN 0
             ELSE missing_runs + 1
           END
       `).run();
@@ -398,7 +468,199 @@ export class EnrichmentCache {
     };
   }
 
-  getRankedDue(limit, { errorHours = 6, freeHours = 23, occupiedDays = 30 } = {}) {
+  getCompletedHistoricalCcIds() {
+    return new Set(
+      this.db.prepare(`
+        SELECT version FROM source_sync
+        WHERE source = 'commoncrawl_history' AND completed_at IS NOT NULL
+      `).all().map((row) => row.version)
+    );
+  }
+
+  recordDiscoveryCandidates(
+    { commoncrawl = null, wikipedia = null, historicalCc = null, words = null },
+    { maxPerRun = 10000 } = {}
+  ) {
+    const budget = Math.max(0, Math.floor(maxPerRun));
+    const before = this.db.prepare('SELECT COUNT(*) AS c FROM ranked_candidates').get().c;
+    const sourceRows = [
+      { source: 'wikipedia', map: wikipedia, kind: 'wikipedia', historical: false },
+      { source: 'commoncrawl', map: commoncrawl, kind: 'commoncrawl', historical: false },
+      { source: 'commoncrawl_history', map: historicalCc, kind: 'commoncrawl', historical: true }
+    ];
+    const stateStmt = this.db.prepare(`
+      SELECT * FROM source_sync WHERE source = ? AND version = ?
+    `);
+    const initState = this.db.prepare(`
+      INSERT INTO source_sync (source, version, cursor, total, completed_at, updated_at)
+      VALUES (?, ?, 0, ?, NULL, ?)
+      ON CONFLICT(source, version) DO UPDATE SET
+        total = excluded.total,
+        updated_at = excluded.updated_at
+    `);
+    const updateState = this.db.prepare(`
+      UPDATE source_sync SET
+        cursor = ?,
+        total = ?,
+        completed_at = ?,
+        updated_at = ?
+      WHERE source = ? AND version = ?
+    `);
+    const upsert = this.db.prepare(`
+      INSERT INTO ranked_candidates (
+        domain, tld, first_seen_at, last_seen_at, active,
+        in_commoncrawl, in_commoncrawl_history, cc_hosts,
+        cc_graph_count, cc_first_graph, cc_last_graph,
+        in_wikipedia, wikipedia_links, candidate_priority
+      ) VALUES (
+        @domain, @tld, @now, @now, 1,
+        @in_commoncrawl, @in_commoncrawl_history, @cc_hosts,
+        @cc_graph_count, @cc_first_graph, @cc_last_graph,
+        @in_wikipedia, @wikipedia_links, @candidate_priority
+      )
+      ON CONFLICT(domain) DO UPDATE SET
+        tld = excluded.tld,
+        last_seen_at = excluded.last_seen_at,
+        active = 1,
+        in_commoncrawl = MAX(ranked_candidates.in_commoncrawl, excluded.in_commoncrawl),
+        in_commoncrawl_history = MAX(ranked_candidates.in_commoncrawl_history, excluded.in_commoncrawl_history),
+        cc_hosts = CASE
+          WHEN excluded.cc_hosts IS NULL THEN ranked_candidates.cc_hosts
+          WHEN ranked_candidates.cc_hosts IS NULL THEN excluded.cc_hosts
+          ELSE MAX(ranked_candidates.cc_hosts, excluded.cc_hosts)
+        END,
+        cc_graph_count = ranked_candidates.cc_graph_count + excluded.cc_graph_count,
+        cc_first_graph = COALESCE(ranked_candidates.cc_first_graph, excluded.cc_first_graph),
+        cc_last_graph = COALESCE(excluded.cc_last_graph, ranked_candidates.cc_last_graph),
+        in_wikipedia = MAX(ranked_candidates.in_wikipedia, excluded.in_wikipedia),
+        wikipedia_links = CASE
+          WHEN excluded.wikipedia_links IS NULL THEN ranked_candidates.wikipedia_links
+          WHEN ranked_candidates.wikipedia_links IS NULL THEN excluded.wikipedia_links
+          ELSE MAX(ranked_candidates.wikipedia_links, excluded.wikipedia_links)
+        END,
+        candidate_priority = MAX(ranked_candidates.candidate_priority, excluded.candidate_priority)
+    `);
+
+    let remaining = budget;
+    const sources = [];
+    const now = new Date().toISOString();
+
+    for (const source of sourceRows) {
+      if (!(source.map instanceof Map) || source.map.size === 0) continue;
+      const version = String(source.map.sourceVersion || source.map.fetchedAt || '');
+      if (!version) continue;
+
+      const existingState = stateStmt.get(source.source, version);
+      if (existingState?.completed_at) {
+        sources.push({
+          source: source.source,
+          version,
+          imported: 0,
+          cursor: existingState.cursor,
+          total: existingState.total,
+          completed: true
+        });
+        continue;
+      }
+      if (remaining <= 0) {
+        if (!existingState) initState.run(source.source, version, source.map.size, now);
+        const waitingState = stateStmt.get(source.source, version);
+        sources.push({
+          source: source.source,
+          version,
+          imported: 0,
+          cursor: waitingState?.cursor ?? 0,
+          total: waitingState?.total ?? source.map.size,
+          completed: false
+        });
+        continue;
+      }
+
+      const candidates = [];
+      for (const [domainRaw, rawValue] of source.map) {
+        const domain = String(domainRaw).toLowerCase();
+        const parsed = candidateBase(domain);
+        if (!parsed) continue;
+        const value = Math.max(0, Number(rawValue) || 0);
+        const priority = candidatePriority(domain, {
+          words,
+          ccHosts: source.kind === 'commoncrawl' ? value : 0,
+          wikipediaLinks: source.kind === 'wikipedia' ? value : 0,
+          historical: source.historical
+        });
+        if (priority == null) continue;
+        candidates.push({ domain, tld: parsed.tld, value, priority });
+      }
+      candidates.sort((a, b) => b.priority - a.priority || a.domain.localeCompare(b.domain, 'sv'));
+
+      if (!existingState) initState.run(source.source, version, candidates.length, now);
+      const state = stateStmt.get(source.source, version);
+      const cursor = Math.min(state?.cursor ?? 0, candidates.length);
+      const end = Math.min(candidates.length, cursor + remaining);
+      const slice = candidates.slice(cursor, end);
+      const completed = end >= candidates.length;
+
+      const tx = this.db.transaction(() => {
+        for (const candidate of slice) {
+          const isCc = source.kind === 'commoncrawl';
+          const graph = isCc ? version : null;
+          upsert.run({
+            domain: candidate.domain,
+            tld: candidate.tld,
+            now,
+            in_commoncrawl: isCc && !source.historical ? 1 : 0,
+            in_commoncrawl_history: isCc && source.historical ? 1 : 0,
+            cc_hosts: isCc ? candidate.value : null,
+            cc_graph_count: isCc ? 1 : 0,
+            cc_first_graph: graph,
+            cc_last_graph: graph,
+            in_wikipedia: source.kind === 'wikipedia' ? 1 : 0,
+            wikipedia_links: source.kind === 'wikipedia' ? candidate.value : null,
+            candidate_priority: candidate.priority
+          });
+        }
+        updateState.run(
+          end,
+          candidates.length,
+          completed ? now : null,
+          now,
+          source.source,
+          version
+        );
+      });
+      tx();
+
+      remaining -= slice.length;
+      sources.push({
+        source: source.source,
+        version,
+        imported: slice.length,
+        cursor: end,
+        total: candidates.length,
+        completed
+      });
+    }
+
+    const after = this.db.prepare('SELECT COUNT(*) AS c FROM ranked_candidates').get().c;
+    return {
+      imported: budget - remaining,
+      newCandidates: Math.max(0, after - before),
+      sources
+    };
+  }
+
+  getDiscoverySourceStats() {
+    return this.db.prepare(`
+      SELECT source, version, cursor, total, completed_at, updated_at
+      FROM source_sync
+      ORDER BY updated_at DESC
+    `).all();
+  }
+
+  getRankedDue(
+    limit,
+    { errorHours = 6, freeHours = 23, discoveryFreeDays = 7, occupiedDays = 30 } = {}
+  ) {
     if (!Number.isFinite(limit) || limit <= 0) return [];
     const cutoff = (hours) => new Date(Date.now() - hours * 3600000).toISOString();
     return this.db.prepare(`
@@ -406,18 +668,38 @@ export class EnrichmentCache {
       WHERE active = 1 AND (
         avail_status IS NULL
         OR (avail_status = 'error' AND (avail_attempted_at IS NULL OR avail_attempted_at < ?))
-        OR (avail_status = 'free' AND (avail_checked_at IS NULL OR avail_checked_at < ?))
+        OR (
+          avail_status = 'free' AND (
+            avail_checked_at IS NULL
+            OR (
+              (in_tranco = 1 OR in_majestic = 1 OR in_opr = 1)
+              AND avail_checked_at < ?
+            )
+            OR (
+              in_tranco = 0 AND in_majestic = 0 AND in_opr = 0
+              AND avail_checked_at < ?
+            )
+          )
+        )
         OR (avail_status = 'occupied' AND (avail_checked_at IS NULL OR avail_checked_at < ?))
       )
       ORDER BY
         CASE WHEN avail_status IS NULL THEN 0 WHEN avail_status = 'error' THEN 1 WHEN avail_status = 'free' THEN 2 ELSE 3 END,
+        CASE WHEN in_wikipedia = 1 THEN 0 WHEN in_tranco = 1 OR in_majestic = 1 OR in_opr = 1 THEN 1 ELSE 2 END,
+        candidate_priority DESC,
         CASE WHEN avail_status IS NULL THEN first_seen_at END DESC,
         CASE WHEN tranco_rank IS NULL THEN 1 ELSE 0 END, tranco_rank ASC,
         CASE WHEN majestic_rank IS NULL THEN 1 ELSE 0 END, majestic_rank ASC,
         CASE WHEN opr_rank IS NULL THEN 1 ELSE 0 END, opr_rank ASC,
         domain ASC
       LIMIT ?
-    `).all(cutoff(errorHours), cutoff(freeHours), cutoff(occupiedDays * 24), Math.floor(limit));
+    `).all(
+      cutoff(errorHours),
+      cutoff(freeHours),
+      cutoff(discoveryFreeDays * 24),
+      cutoff(occupiedDays * 24),
+      Math.floor(limit)
+    );
   }
 
   setRankedAvailability(domain, taken) {

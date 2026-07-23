@@ -61,7 +61,7 @@
               <button type="button" data-view="released" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner som frisläppts de senaste 90 dagarna">🆕 Nysläppta</button>
               <button type="button" data-view="upcoming" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade domäner som frisläpps inom nästa dygn">💎 Nästa 24 h</button>
               <button type="button" data-view="free" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade nyligen frisläppta domäner som bekräftats lediga">✨ Lediga nu</button>
-              <button type="button" data-view="ranked" class="view-pill px-3 py-1.5" title="Lediga .se- och .nu-domäner från Tranco, Majestic Million eller Open PageRank Top 10M">🏆 Äldre guldkorn</button>
+              <button type="button" data-view="ranked" class="view-pill px-3 py-1.5" title="Redan lediga .se- och .nu-domäner från rankningslistor, Common Crawl och Wikipedia">🏆 Äldre guldkorn</button>
             </div>
 
             <!-- TLD-pills -->
@@ -147,6 +147,9 @@
                     <label for="f-ahrefs-dr-min">Ahrefs DR</label>
                     <input id="f-ahrefs-dr-min" aria-label="Minsta Ahrefs Domain Rating" type="number" min="0" max="100" placeholder="0" class="score-filter" />
                     <input id="f-ahrefs-dr-max" aria-label="Högsta Ahrefs Domain Rating" type="number" min="0" max="100" placeholder="100" class="score-filter" />
+                    <label for="f-wikipedia-links-min">Wikipedia-länkar</label>
+                    <input id="f-wikipedia-links-min" aria-label="Minsta antal Wikipedia-länkar" type="number" min="0" placeholder="0" class="score-filter" />
+                    <input id="f-wikipedia-links-max" aria-label="Högsta antal Wikipedia-länkar" type="number" min="0" placeholder="∞" class="score-filter" />
                   </div>
                 </div>
                 <label class="flex items-center gap-1.5"><input id="f-word" type="checkbox" class="rounded" /> 📖 Är ett svenskt ord</label>
@@ -155,6 +158,8 @@
                 <label class="flex items-center gap-1.5"><input id="f-opr" type="checkbox" class="rounded" /> 📊 I Open PageRank Top 10M</label>
                 <label class="flex items-center gap-1.5"><input id="f-ahrefs" type="checkbox" class="rounded" /> 🟠 Har Ahrefs DR över 0</label>
                 <label class="flex items-center gap-1.5"><input id="f-cc" type="checkbox" class="rounded" /> 🌐 Finns i Common Crawl</label>
+                <label class="flex items-center gap-1.5"><input id="f-cc-history" type="checkbox" class="rounded" /> 🕰 Finns i historisk Common Crawl</label>
+                <label class="flex items-center gap-1.5"><input id="f-wikipedia" type="checkbox" class="rounded" /> W Finns i svenska Wikipedia-länkar</label>
                 <label class="flex items-center gap-1.5"><input id="f-wayback" type="checkbox" class="rounded" /> ⏳ Har Wayback-snapshots</label>
                 <label class="flex items-center gap-1.5"><input id="f-dns" type="checkbox" class="rounded" /> 📡 Har aktiva DNS-records</label>
                 <div class="border-t border-slate-200 dark:border-slate-700 pt-2">
@@ -228,6 +233,8 @@
               <button type="button" data-sort="majestic_rank" class="th-sort justify-end" title="Majestic Million-rank, lägre är bättre">Majestic <span class="sort-ind"></span></button>
               <button type="button" data-sort="opr_rank" class="th-sort justify-end" title="Open PageRank Top 10M, lägre är bättre">OPR <span class="sort-ind"></span></button>
               <button type="button" data-sort="tranco_rank" class="th-sort justify-end" title="Tranco Top 1M, lägre är bättre">Tranco <span class="sort-ind"></span></button>
+              <button type="button" data-sort="wikipedia_links" class="th-sort justify-end" title="Antal externa länkrader från svenska Wikipedia">Wiki <span class="sort-ind"></span></button>
+              <button type="button" data-sort="discovery_priority" class="th-sort text-left" title="Vilka källor som ledde till kandidaten">Källor <span class="sort-ind"></span></button>
               <div class="text-left">Signaler</div>
               <button type="button" data-sort="length" class="th-sort text-left">Len <span class="sort-ind"></span></button>
               <button type="button" data-sort="release_at" class="th-sort text-left">Frisläpps <span class="sort-ind"></span></button>
@@ -314,6 +321,8 @@
               <li>📖 Är ett svenskt ord</li>
               <li>⭐ Tranco-rank (popularitet)</li>
               <li>🔗 Backlinks (Majestic)</li>
+              <li>🌐 Aktuell/historisk Common Crawl</li>
+              <li>W Externa länkar från svenska Wikipedia</li>
               <li>⏳ Wayback-snapshots</li>
               <li>📡 Aktiva DNS-records</li>
               <li>🟠 Domain Rating by Ahrefs</li>
@@ -326,7 +335,7 @@
             <ul class="space-y-1 text-xs">
               <li><strong>Nästa 24 h</strong> rankar kommande frisläppningar efter totalpoäng.</li>
               <li><strong>Lediga nu</strong> visar endast domäner som Internetstiftelsens DAS bekräftat som lediga.</li>
-              <li><strong>Äldre guldkorn</strong> visar DAS-bekräftat lediga domäner som finns i Tranco, Majestic Million eller Open PageRank Top 10M.</li>
+              <li><strong>Äldre guldkorn</strong> visar DAS-bekräftat lediga domäner från rankningslistor, Common Crawl och svenska Wikipedias externa länkar.</li>
               <li>”Sedd ledig” räknas från första gången denna tjänst upptäckte ledigheten.</li>
               <li>Efterfrågan är en indikativ poäng från ord-, popularitets- och länksignaler.</li>
               <li>Risk är teknisk/namnbaserad och ersätter inte en varumärkeskontroll.</li>
@@ -342,6 +351,8 @@
             <a class="underline" href="https://tranco-list.eu/" target="_blank" rel="noopener">Tranco</a> ·
             <a class="underline" href="https://majestic.com/reports/majestic-million" target="_blank" rel="noopener">Majestic Million</a> ·
             <a class="underline" href="https://www.domcop.com/openpagerank/" target="_blank" rel="noopener">Open PageRank</a> ·
+            <a class="underline" href="https://commoncrawl.org/" target="_blank" rel="noopener">Common Crawl</a> ·
+            <a class="underline" href="https://dumps.wikimedia.org/svwiki/latest/" target="_blank" rel="noopener">sv.wikipedia</a> ·
             <a class="underline" href="https://ahrefs.com/" target="_blank" rel="noopener">Domain Rating by Ahrefs</a> ·
             <a class="underline" href="https://web.archive.org/" target="_blank" rel="noopener">Wayback</a>
           </span>

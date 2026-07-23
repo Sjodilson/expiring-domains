@@ -14,8 +14,11 @@ webbläsaren via en SQLite-databas (sql.js) — inga uppgifter skickas vidare.
 - Nysläppta-vy: 90 dagars historik med registerstatus från Internetstiftelsens DAS
 - Guldkornspoäng för varumärke, SEO/historik, indikativ efterfrågan och risk
 - Topplistor för bästa domäner nästa 24 timmar och bästa bekräftat lediga nu
-- Äldre guldkorn: lediga .se/.nu från Tranco, Majestic Million eller Open PageRank Top 10M
-- Beständig rankningsbevakning som prioriterar nya kandidater och återkontrollerar lediga dagligen
+- Äldre guldkorn: redan lediga .se/.nu från rankningslistor, Common Crawl och svenska Wikipedia
+- Rullande discoverykö som går igenom över 700 000 tidigare observerade .se/.nu-domäner
+- Historiska Common Crawl-årsgrafer importeras successivt för att hitta sajter som sedan länge försvunnit
+- Separata källmarkeringar och filter för aktuell/historisk Common Crawl och Wikipedia
+- Beständig kandidatbevakning som prioriterar nya kandidater och återkontrollerar lediga domäner
 - Sorterbar och filtrerbar Ahrefs Domain Rating med direktlänk till förifylld Backlink Checker
 - Uppdateras varje timme via GitHub Actions (full berikning kl 05 UTC)
 
@@ -42,12 +45,13 @@ timvisa körningarna uppdaterar nysläppta domäner och deras registerstatus via
 Internetstiftelsens Free/DAS. Upptagna domäners A-, MX- och NS-records sparas
 separat. DNS-timeout och SERVFAIL markeras som kontrollfel och cachas aldrig
 som "inga records". Den fulla berikningen (Wayback + stor DNS-batch) körs i
-05-körningen (UTC). Rankningskandidater kontrolleras i batchar om högst 5 000
-per körning. Nya och okontrollerade kandidater prioriteras, lediga kontrolleras
-ungefär dagligen och upptagna ungefär månadsvis. En kandidat inaktiveras först
-efter tre lyckade rankningskörningar där den saknas.
+05-körningen (UTC). Discovery-kandidater importeras och DAS-kontrolleras i
+kontrollerade batchar om högst 5 000 per körning. Svenska Wikipedias externa
+länkar prioriteras först, därefter aktuell Common Crawl och sedan historiska
+årsgrafer. Rankade lediga domäner kontrolleras ungefär dagligen, övriga
+discoveryfynd ungefär veckovis och upptagna ungefär månadsvis.
 
-Ahrefs DR hämtas från det kostnadsfria API:t i högst 75 anrop per körning,
+Ahrefs DR hämtas från det kostnadsfria API:t i högst 1 000 anrop per körning,
 cachas i 30 dagar och stryps till under 60 anrop/minut. Lägg API-nyckeln som
 repository secret med namnet `AHREFS_API_KEY`; om den saknas hoppas DR-steget
 över utan att resten av bygget påverkas. API-nyckeln får aldrig läggas i en fil
@@ -62,6 +66,8 @@ Aktivera GitHub Pages: **Settings → Pages → Source: GitHub Actions**.
 - https://tranco-list.eu/
 - https://majestic.com/reports/majestic-million
 - https://www.domcop.com/openpagerank/
+- https://commoncrawl.org/
+- https://dumps.wikimedia.org/svwiki/latest/
 - https://api.ahrefs.com/v3/public/domain-rating-free
 
 Ahrefs-värden visas med attributionen

@@ -133,11 +133,11 @@ body {
 }
 #thead,
 #viewport {
-  min-width: 1320px;
+  min-width: 1510px;
 }
 #thead,
 #rows .row {
-  grid-template-columns: 28px 20px minmax(150px, 1fr) 62px 62px 68px 72px 58px 68px 88px 88px 88px minmax(130px, auto) 50px 110px 30px;
+  grid-template-columns: 28px 20px minmax(150px, 1fr) 62px 62px 68px 72px 58px 68px 88px 88px 88px 70px 120px minmax(130px, auto) 50px 110px 30px;
 }
 #rows .row {
   display: grid;
@@ -254,6 +254,30 @@ body {
 .dark .sig.tranco { background: rgb(120 53 15 / 0.5); color: rgb(253 230 138); }
 .sig.majestic { background: rgb(233 213 255); color: rgb(107 33 168); }
 .dark .sig.majestic { background: rgb(88 28 135 / 0.5); color: rgb(233 213 255); }
+
+.source-list {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: rgb(148 163 184);
+  font-size: 0.7rem;
+}
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.3rem;
+  border-radius: 999px;
+  background: rgb(226 232 240);
+  color: rgb(51 65 85);
+  font-weight: 600;
+}
+.dark .source-chip {
+  background: rgb(51 65 85);
+  color: rgb(226 232 240);
+}
 .sig.ahrefs { background: rgb(255 237 213); color: rgb(154 52 18); }
 .dark .sig.ahrefs { background: rgb(124 45 18 / 0.5); color: rgb(254 215 170); }
 .sig.wayback { background: rgb(207 250 254); color: rgb(14 116 144); }

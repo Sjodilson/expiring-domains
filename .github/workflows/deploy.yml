@@ -49,12 +49,17 @@ jobs:
           if [ "$(date -u +%H)" = "05" ]; then
             echo "WAYBACK_MAX=1000" >> "$GITHUB_ENV"
             echo "DNS_MAX=10000" >> "$GITHUB_ENV"
+            # Extrahera högst en äldre Common Crawl-årsgraph. Pending-filen
+            # importeras rullande innan nästa stora graph hämtas.
+            echo "CC_HISTORY_DOWNLOADS=1" >> "$GITHUB_ENV"
           else
             echo "WAYBACK_MAX=0" >> "$GITHUB_ENV"
             echo "DNS_MAX=1000" >> "$GITHUB_ENV"
+            echo "CC_HISTORY_DOWNLOADS=0" >> "$GITHUB_ENV"
           fi
-          # Hård gräns: första backfillen blir klar på cirka tio timkörningar.
-          # Därefter återstår normalt bara nya och förfallna återkontroller.
+          # Nya discovery-kandidater importeras i samma takt som DAS-kön
+          # kontrolleras, så cache och körtid växer kontrollerat.
+          echo "DISCOVERY_IMPORT_MAX=5000" >> "$GITHUB_ENV"
           echo "RANKED_AVAIL_MAX=5000" >> "$GITHUB_ENV"
           # Gratis DR-endpoint, strypt till under Ahrefs gräns 60 anrop/minut.
           # 1 000 anrop tar cirka 18 minuter och kortar den första backfillen

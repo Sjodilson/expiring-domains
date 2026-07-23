@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:data": "node scripts/build-data.mjs",
+    "test": "node --test scripts/lib/discovery.test.mjs",
     "dev": "vite",
     "build": "npm run build:data && vite build",
     "build:site": "vite build",

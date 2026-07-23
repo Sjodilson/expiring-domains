@@ -150,16 +150,16 @@ export async function checkAvailability(released, cache, { log }) {
   return { checked: todo.length, taken, free, errors, dnsRepaired: dnsRepair.length };
 }
 
-// Äldre guldkorn kommer direkt från rankningslistorna och saknar normalt ett
-// känt frisläppningsdatum. Cachen väljer vilka kandidater som är förfallna för
-// kontroll; här utförs endast den budgeterade DAS-batchen.
+// Äldre guldkorn kommer från ranknings- och discoverykällor och saknar normalt
+// ett känt frisläppningsdatum. Cachen väljer vilka kandidater som är förfallna
+// för kontroll; här utförs endast den budgeterade DAS-batchen.
 export async function checkRankedAvailability(candidates, cache, { log }) {
   if (candidates.length === 0) return { checked: 0, occupied: 0, free: 0, errors: 0 };
 
   let occupied = 0;
   let free = 0;
   let errors = 0;
-  log(`  Rankade kandidater (DAS): kollar ${candidates.length.toLocaleString('sv-SE')} domäner`);
+  log(`  Discovery-kandidater (DAS): kollar ${candidates.length.toLocaleString('sv-SE')} domäner`);
   await runDasBatches(
     candidates,
     async (row) => {
@@ -174,10 +174,10 @@ export async function checkRankedAvailability(candidates, cache, { log }) {
       else free++;
     },
     (done, total) => {
-      if (done % 250 === 0 || done === total) log(`    Rankad DAS: ${done}/${total}`);
+      if (done % 250 === 0 || done === total) log(`    Discovery DAS: ${done}/${total}`);
     }
   );
-  log(`  Rankad tillgänglighet: ${occupied} upptagna, ${free} lediga, ${errors} kontrollfel`);
+  log(`  Discovery-tillgänglighet: ${occupied} upptagna, ${free} lediga, ${errors} kontrollfel`);
   return { checked: candidates.length, occupied, free, errors };
 }
 
