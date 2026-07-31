@@ -59,6 +59,7 @@
             <div role="radiogroup" aria-label="Vy" class="flex rounded-md border border-slate-300 dark:border-slate-700 overflow-hidden text-sm">
               <button type="button" data-view="karens" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner i karens som frisläpps framöver">I karens</button>
               <button type="button" data-view="released" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Domäner som frisläppts de senaste 90 dagarna">🆕 Nysläppta</button>
+              <button type="button" data-view="taken" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Nysläppta domäner som har registrerats igen">🔒 Tagna</button>
               <button type="button" data-view="upcoming" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade domäner som frisläpps inom nästa dygn">💎 Nästa 24 h</button>
               <button type="button" data-view="free" class="view-pill px-3 py-1.5 border-r border-slate-300 dark:border-slate-700" title="Högst rankade nyligen frisläppta domäner som bekräftats lediga">✨ Lediga nu</button>
               <button type="button" data-view="ranked" class="view-pill px-3 py-1.5" title="Redan lediga .se- och .nu-domäner från rankningslistor, Common Crawl och Wikipedia">🏆 Äldre guldkorn</button>
@@ -163,7 +164,6 @@
                 <label class="flex items-center gap-1.5"><input id="f-wayback" type="checkbox" class="rounded" /> ⏳ Har Wayback-snapshots</label>
                 <label class="flex items-center gap-1.5"><input id="f-dns" type="checkbox" class="rounded" /> 📡 Har aktiva DNS-records</label>
                 <div class="border-t border-slate-200 dark:border-slate-700 pt-2">
-                  <label class="flex items-center gap-1.5"><input id="f-watch" type="checkbox" class="rounded" /> 🔖 Endast bevakade</label>
                   <label class="flex items-center gap-1.5"><input id="f-notes" type="checkbox" class="rounded" /> 📝 Endast med anteckning</label>
                 </div>
               </div>
@@ -182,6 +182,14 @@
                 <div id="saved-list" class="space-y-1 max-h-72 overflow-auto"></div>
               </div>
             </div>
+
+            <!-- Favoriter är ett vanligt filter och ska inte gömmas under Kvalitet -->
+            <input id="f-watch" type="checkbox" class="hidden" tabindex="-1" aria-hidden="true" />
+            <button id="favorites-filter-btn" type="button" aria-pressed="false"
+              class="favorites-filter-btn px-3 py-1.5 border border-slate-300 dark:border-slate-700 rounded-md text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
+              title="Visa endast stjärnmarkerade favoriter">
+              ⭐ Favoriter <span id="favorites-count" class="text-xs opacity-70">0</span>
+            </button>
 
             <button id="reset" type="button" class="text-xs text-slate-600 dark:text-slate-400 underline hover:text-slate-900 dark:hover:text-white">Återställ</button>
           </div>

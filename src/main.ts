@@ -120,7 +120,7 @@ interface Row {
   first_free_at: string | null;
 }
 
-type View = 'karens' | 'released' | 'upcoming' | 'free' | 'ranked';
+type View = 'karens' | 'released' | 'taken' | 'upcoming' | 'free' | 'ranked';
 type SortKey = 'release_at' | 'name' | 'length' | 'majestic_refsubnets' | 'opr_score' |
   'score_total' | 'score_brand' | 'score_authority' | 'score_demand' | 'score_risk' |
   'tranco_rank' | 'majestic_rank' | 'opr_rank' | 'ahrefs_dr' | 'wikipedia_links' |
@@ -287,7 +287,9 @@ const els = {
   savedPop: $('saved-pop'),
   savedName: $<HTMLInputElement>('saved-name'),
   savedAdd: $<HTMLButtonElement>('saved-add'),
-  savedList: $('saved-list')
+  savedList: $('saved-list'),
+  favoritesFilterBtn: $<HTMLButtonElement>('favorites-filter-btn'),
+  favoritesCount: $('favorites-count')
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -338,6 +340,19 @@ function saveSaved() {
 function toggleWatch(name: string) {
   if (watchlist.has(name)) watchlist.delete(name); else watchlist.add(name);
   saveWatchlist();
+  updateFavoritesFilterButton();
+}
+
+function updateFavoritesFilterButton() {
+  const active = els.fWatch.checked;
+  els.favoritesFilterBtn.classList.toggle('active', active);
+  els.favoritesFilterBtn.setAttribute('aria-pressed', String(active));
+  els.favoritesCount.textContent = watchlist.size.toLocaleString('sv-SE');
+}
+
+function renderAfterWatchChange() {
+  if (els.fWatch.checked) refresh();
+  else render();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -456,7 +471,10 @@ function writeFilters(f: Partial<Filters>) {
   if (f.wikipedia !== undefined) els.fWikipedia.checked = f.wikipedia;
   if (f.wayback !== undefined) els.fWayback.checked = f.wayback;
   if (f.dns !== undefined) els.fDns.checked = f.dns;
-  if (f.watch !== undefined) els.fWatch.checked = f.watch;
+  if (f.watch !== undefined) {
+    els.fWatch.checked = f.watch;
+    updateFavoritesFilterButton();
+  }
   if (f.notes !== undefined) els.fNotes.checked = f.notes;
   if (f.minLen !== undefined) els.fMinLen.value = f.minLen == null ? '' : String(f.minLen);
   if (f.maxLen !== undefined) els.fMaxLen.value = f.maxLen == null ? '' : String(f.maxLen);
@@ -578,7 +596,7 @@ function qsToFilters(qs: string): Partial<Filters> {
     } else if (long === 'q' || long === 'tld' || long === 'from' || long === 'to') {
       f[long] = val;
     } else if (long === 'view') {
-      f[long] = val === 'released' || val === 'upcoming' || val === 'free' || val === 'ranked' ? val : 'karens';
+      f[long] = val === 'released' || val === 'taken' || val === 'upcoming' || val === 'free' || val === 'ranked' ? val : 'karens';
     } else if (long === 'sortKey') {
       f[long] = ['name', 'length', 'majestic_refsubnets', 'opr_score', 'score_total', 'score_brand', 'score_authority', 'score_demand', 'score_risk', 'tranco_rank', 'majestic_rank', 'opr_rank', 'ahrefs_dr', 'wikipedia_links', 'discovery_priority'].includes(val) ? val : 'release_at';
     } else if (long === 'sortDir') {
@@ -603,6 +621,9 @@ function buildWhere(f: Filters, includeQ: boolean, includeNotes: boolean): { sql
   const clauses: string[] = [];
   const params: SqlValue[] = [];
   if (f.view === 'released') clauses.push('in_release_feed = 1 AND released = 1');
+  else if (f.view === 'taken') {
+    clauses.push("in_release_feed = 1 AND released = 1 AND (taken = 1 OR availability_status = 'occupied')");
+  }
   else if (f.view === 'upcoming') {
     clauses.push('in_release_feed = 1 AND released = 0');
     clauses.push("release_at >= date('now') AND release_at <= date('now', '+1 day')");
@@ -1009,7 +1030,7 @@ function renderActivePills() {
     word: '📖 ord', tranco: '⭐ Tranco', majestic: '🔗 backlinks', opr: '📊 OPR',
     ahrefs: '🟠 Ahrefs DR', cc: '🌐 Common Crawl', ccHistory: '🕰 historisk CC',
     wikipedia: 'W Wikipedia', wayback: '⏳ wayback', dns: '📡 dns',
-    watch: '🔖 bevakade', notes: '📝 antecknade'
+    watch: '⭐ favoriter', notes: '📝 antecknade'
   };
   for (const k of Object.keys(propLabels) as (keyof Filters)[]) {
     if (f[k]) pills.push({ label: propLabels[k as string], clear: () => { writeFilters({ [k]: false } as Partial<Filters>); refresh(); } });
@@ -1059,7 +1080,7 @@ function renderBadges() {
   const propsActive = [f.noDigit, f.noHyphen, f.onlyDigits, f.onlyLetters, f.palindrome, f.repeat, f.cvcv, f.minLen != null, f.maxLen != null].filter(Boolean).length;
   const qualActive = [
     f.word, f.tranco, f.majestic, f.opr, f.ahrefs, f.cc, f.ccHistory, f.wikipedia,
-    f.wayback, f.dns, f.watch, f.notes,
+    f.wayback, f.dns, f.notes,
     f.minScoreTotal != null, f.maxScoreTotal != null, f.minScoreBrand != null, f.maxScoreBrand != null,
     f.minScoreAuthority != null, f.maxScoreAuthority != null, f.minScoreDemand != null, f.maxScoreDemand != null,
     f.minScoreRisk != null, f.maxScoreRisk != null,
@@ -1095,7 +1116,7 @@ function updateViewPills() {
   if (dateBtn && dateBtn.childNodes[0]) {
     dateBtn.childNodes[0].textContent = activeView === 'ranked'
       ? 'Sedd ledig '
-      : activeView === 'released' || activeView === 'free' ? 'Frisläpptes ' : 'Frisläpps ';
+      : activeView === 'released' || activeView === 'taken' || activeView === 'free' ? 'Frisläpptes ' : 'Frisläpps ';
   }
   const range = activeView === 'ranked' ? meta?.ranked?.date_range : meta?.date_range;
   els.from.min = range?.min || '';
@@ -1374,7 +1395,7 @@ function drawerNotesHtml(r: Row): string {
 function wireDrawerActions() {
   const r = drawerRow!;
   els.drawerBody.querySelector<HTMLButtonElement>('[data-drawer-action="star"]')?.addEventListener('click', () => {
-    toggleWatch(r.name); renderDrawerBody(); render();
+    toggleWatch(r.name); renderDrawerBody(); renderAfterWatchChange();
   });
   els.drawerBody.querySelector<HTMLButtonElement>('[data-drawer-action="copy"]')?.addEventListener('click', () => {
     copyToClipboard(r.name);
@@ -1478,7 +1499,7 @@ function resetAll(doRefresh = true) {
 function applyDatePreset(p: typeof activePreset) {
   activePreset = p;
   // I Nysläppta-vyn pekar intervallen bakåt i tiden
-  const back = activeView === 'released' || activeView === 'free' || activeView === 'ranked';
+  const back = activeView === 'released' || activeView === 'taken' || activeView === 'free' || activeView === 'ranked';
   switch (p) {
     case 'all': writeFilters({ from: '', to: '' }); break;
     case 'today': writeFilters({ from: todayISO(), to: todayISO() }); break;
@@ -1528,7 +1549,7 @@ function handleKey(e: KeyboardEvent) {
   else if (e.key === 'g') { activeIdx = 0; scrollToActive(); render(); }
   else if (e.key === 'G') { activeIdx = total - 1; scrollToActive(); render(); }
   else if (e.key === 'Enter' && activeIdx >= 0) { const r = getRow(activeIdx); if (r) openDrawer(r); }
-  else if (e.key === 's' && activeIdx >= 0) { const r = getRow(activeIdx); if (r) { toggleWatch(r.name); render(); } }
+  else if (e.key === 's' && activeIdx >= 0) { const r = getRow(activeIdx); if (r) { toggleWatch(r.name); renderAfterWatchChange(); } }
 }
 
 function scrollToActive() {
@@ -1565,7 +1586,7 @@ function wireUi() {
       activeView = v;
       // Guldkornsvyer rankas på poäng; standardvyer på datum.
       currentSort.key = v === 'upcoming' || v === 'free' || v === 'ranked' ? 'score_total' : 'release_at';
-      currentSort.dir = v === 'released' || v === 'upcoming' || v === 'free' || v === 'ranked' ? 'desc' : 'asc';
+      currentSort.dir = v === 'released' || v === 'taken' || v === 'upcoming' || v === 'free' || v === 'ranked' ? 'desc' : 'asc';
       // Datumintervall från andra vyn pekar åt fel håll — nollställ
       activePreset = '';
       updateDatePresets();
@@ -1604,10 +1625,15 @@ function wireUi() {
     els.fNoDigit, els.fNoHyphen, els.fOnlyDigits, els.fOnlyLetters,
     els.fPalindrome, els.fRepeat, els.fCvcv,
     els.fWord, els.fTranco, els.fMajestic, els.fOpr, els.fAhrefs, els.fCc,
-    els.fCcHistory, els.fWikipedia, els.fWayback, els.fDns, els.fWatch, els.fNotes
+    els.fCcHistory, els.fWikipedia, els.fWayback, els.fDns, els.fNotes
   ]) {
     el.addEventListener('change', refresh);
   }
+  els.favoritesFilterBtn.addEventListener('click', () => {
+    els.fWatch.checked = !els.fWatch.checked;
+    updateFavoritesFilterButton();
+    refresh();
+  });
   els.fMinLen.addEventListener('input', debouncedRefresh);
   els.fMaxLen.addEventListener('input', debouncedRefresh);
   for (const el of [
@@ -1653,7 +1679,7 @@ function wireUi() {
     const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
     if (action === 'star') {
       e.preventDefault();
-      const r = getRow(idx); if (r) { toggleWatch(r.name); render(); }
+      const r = getRow(idx); if (r) { toggleWatch(r.name); renderAfterWatchChange(); }
     } else if (action === 'more') {
       e.preventDefault();
       const r = getRow(idx); if (r) openDrawer(r);
@@ -1769,7 +1795,7 @@ async function main() {
     setMeta(m);
     const fromUrl = qsToFilters(location.search.replace(/^\?/, ''));
     if (Object.keys(fromUrl).length) writeFilters(fromUrl);
-    if ((fromUrl.view === 'released' || fromUrl.view === 'upcoming' || fromUrl.view === 'free' || fromUrl.view === 'ranked') && !fromUrl.sortDir) {
+    if ((fromUrl.view === 'released' || fromUrl.view === 'taken' || fromUrl.view === 'upcoming' || fromUrl.view === 'free' || fromUrl.view === 'ranked') && !fromUrl.sortDir) {
       currentSort.dir = 'desc';
     }
     if ((fromUrl.view === 'upcoming' || fromUrl.view === 'free' || fromUrl.view === 'ranked') && !fromUrl.sortKey) {
@@ -1777,6 +1803,7 @@ async function main() {
     }
     updateTldPills();
     updateViewPills();
+    updateFavoritesFilterButton();
     if (fromUrl.from || fromUrl.to) els.dateCustom.classList.remove('hidden');
 
     wireUi();

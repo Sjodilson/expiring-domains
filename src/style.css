@@ -126,6 +126,17 @@ body {
   background: rgb(30 41 59);
 }
 
+.favorites-filter-btn.active {
+  background: rgb(254 243 199);
+  border-color: rgb(245 158 11);
+  color: rgb(146 64 14);
+}
+.dark .favorites-filter-btn.active {
+  background: rgb(120 53 15 / 0.45);
+  border-color: rgb(217 119 6);
+  color: rgb(253 230 138);
+}
+
 /* Virtuella rader */
 .domain-table {
   overflow-x: auto;
